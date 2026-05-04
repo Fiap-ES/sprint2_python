@@ -11,7 +11,7 @@ import shutil
 galeria = []
 palavrasChaves = []
 
-
+# Exibe o menu principal e retorna a opção escolhida pelo usuário.
 def menuPrincipal():
     menuHeader = '\n=======================================\n       SNAPNOTE - MENU PRINCIPAL\n=======================================\n'
     opcao = questionary.select(
@@ -28,7 +28,7 @@ def menuPrincipal():
 
     return opcao
 
-
+# Grava o áudio do microfone, transcreve para texto usando o Google e retorna o resultado.
 def gravarAudio():
     reconhecedor = sr.Recognizer()
 
@@ -41,8 +41,8 @@ def gravarAudio():
         try:
             audio = reconhecedor.listen(source, timeout=5, phrase_time_limit=20)
             print("⏳ Processando o áudio...")
-            texto_transcrito = reconhecedor.recognize_google(audio, language='pt-BR')
-            return texto_transcrito
+            textoTranscrito = reconhecedor.recognize_google(audio, language='pt-BR')
+            return textoTranscrito
 
         except sr.UnknownValueError:
             print("❌ Desculpe, o áudio ficou confuso e não foi possível entender.")
@@ -54,7 +54,7 @@ def gravarAudio():
             print("❌ Você demorou muito para falar. Operação cancelada.")
             return None
 
-
+# Abre o explorador para selecionar uma foto, recebe a anotação (texto ou voz) e salva na galeria.
 def adicionarAnotacao():
     print("\n📸 Vamos adicionar uma nova anotação ao SnapNote!")
 
@@ -99,7 +99,7 @@ def adicionarAnotacao():
     else:
         print("\n❌ Operação cancelada. Nenhuma imagem foi selecionada.")
 
-
+# Percorre a lista da galeria e exibe todas as imagens e anotações salvas.
 def exibirAnotacoes():
     if not galeria:
         print("\n⚠️ Sua galeria está vazia. Adicione uma anotação primeiro!")
@@ -109,7 +109,7 @@ def exibirAnotacoes():
     for i in galeria:
         print(f'📁 Caminho: {i["imagem"]}\n📝 Anotação: {i["anotacao"]}\n{"-" * 40}')
 
-
+# Busca por uma palavra específica dentro das anotações e exibe os resultados correspondentes.
 def buscarAnotacao():
     if not galeria:
         print("\n⚠️ Sua galeria está vazia. Adicione uma anotação primeiro!")
@@ -130,11 +130,11 @@ def buscarAnotacao():
     else:
         print(f"\n✅ {resultadosEncontrados} resultado(s) encontrado(s)!")
 
-
+# Limpa o texto do terminal de acordo com o sistema operacional (Windows ou Mac/Linux).
 def limparTerminal():
     os.system('cls' if os.name == 'nt' else 'clear')
 
-
+# Copia de forma segura um arquivo de imagem da origem para o destino.
 def copiarImagem(origem, destino):
     if os.path.exists(origem):
         try:
@@ -148,7 +148,7 @@ def copiarImagem(origem, destino):
         print("\n❌ Erro: O arquivo original não foi encontrado no caminho especificado.")
         return None
 
-
+# Gerencia o submenu de palavras-chave, permitindo cadastrar, consultar, apagar ou visualizar pastas.
 def cadPalavraChave():
     while True:
         opcao = questionary.select(
@@ -175,9 +175,9 @@ def cadPalavraChave():
                 palavrasChaves.append(palavra)
                 for i in galeria:
                     if palavra in i['anotacao'].lower():
-                        destino_absoluto = os.path.join(os.getcwd(), palavra)
-                        os.makedirs(destino_absoluto, exist_ok=True)
-                        novoCaminho = copiarImagem(i['imagem'], destino_absoluto)
+                        destinoAbsoluto = os.path.join(os.getcwd(), palavra)
+                        os.makedirs(destinoAbsoluto, exist_ok=True)
+                        novoCaminho = copiarImagem(i['imagem'], destinoAbsoluto)
                         if novoCaminho:
                             i['imagem'] = novoCaminho
                 print(
@@ -198,24 +198,24 @@ def cadPalavraChave():
             if not palavrasChaves:
                 print("\n⚠️ Nenhuma palavra-chave cadastrada para apagar.")
             else:
-                opcoes_exclusao = [Choice(title=p.capitalize(), value=p) for p in palavrasChaves]
-                palavra_apagar = questionary.select(
+                opcoesExclusao = [Choice(title=p.capitalize(), value=p) for p in palavrasChaves]
+                palavraApagar = questionary.select(
                     "\n🗑️ Qual palavra-chave deseja apagar?",
-                    choices=opcoes_exclusao
+                    choices=opcoesExclusao
                 ).ask()
 
-                if palavra_apagar:
+                if palavraApagar:
                     confirmacao = questionary.confirm(
-                        f"Tem certeza que deseja apagar a palavra '{palavra_apagar}' e excluir a sua pasta?").ask()
+                        f"Tem certeza que deseja apagar a palavra '{palavraApagar}' e excluir a sua pasta?").ask()
 
                     if confirmacao:
-                        palavrasChaves.remove(palavra_apagar)
-                        caminho_pasta = os.path.join(os.getcwd(), palavra_apagar)
+                        palavrasChaves.remove(palavraApagar)
+                        caminhoPasta = os.path.join(os.getcwd(), palavraApagar)
 
-                        if os.path.exists(caminho_pasta):
-                            shutil.rmtree(caminho_pasta, ignore_errors=True)
+                        if os.path.exists(caminhoPasta):
+                            shutil.rmtree(caminhoPasta, ignore_errors=True)
 
-                        print(f"\n✅ Palavra-chave '{palavra_apagar}' e sua pasta foram removidas com sucesso!")
+                        print(f"\n✅ Palavra-chave '{palavraApagar}' e sua pasta foram removidas com sucesso!")
                     else:
                         print("\n❌ Operação cancelada.")
 
@@ -223,23 +223,23 @@ def cadPalavraChave():
             if not palavrasChaves:
                 print("\n⚠️ Nenhuma palavra-chave cadastrada para visualizar.")
             else:
-                opcoes_visualizar = [Choice(title=p.capitalize(), value=p) for p in palavrasChaves]
-                palavra_visualizar = questionary.select(
+                opcoesVisualizar = [Choice(title=p.capitalize(), value=p) for p in palavrasChaves]
+                palavraVisualizar = questionary.select(
                     "\n📂 Qual pasta de palavra-chave deseja abrir?",
-                    choices=opcoes_visualizar
+                    choices=opcoesVisualizar
                 ).ask()
 
-                if palavra_visualizar:
-                    caminho_pasta = os.path.join(os.getcwd(), palavra_visualizar)
+                if palavraVisualizar:
+                    caminhoPasta = os.path.join(os.getcwd(), palavraVisualizar)
 
-                    if os.path.exists(caminho_pasta):
+                    if os.path.exists(caminhoPasta):
                         if os.name == 'nt':
-                            os.startfile(caminho_pasta)
+                            os.startfile(caminhoPasta)
                         elif sys.platform == 'darwin':
-                            subprocess.Popen(['open', caminho_pasta])
+                            subprocess.Popen(['open', caminhoPasta])
                         else:
-                            subprocess.Popen(['xdg-open', caminho_pasta])
-                        print(f"\n✅ Abrindo o explorador na pasta: {caminho_pasta}")
+                            subprocess.Popen(['xdg-open', caminhoPasta])
+                        print(f"\n✅ Abrindo o explorador na pasta: {caminhoPasta}")
                     else:
                         print(
                             "\n⚠️ A pasta para esta palavra-chave ainda não existe no disco (nenhuma imagem foi vinculada a ela ainda).")
@@ -252,7 +252,7 @@ def cadPalavraChave():
         else:
             break
 
-
+# Loop principal de execução do programa
 while True:
     opcao = menuPrincipal()
 
