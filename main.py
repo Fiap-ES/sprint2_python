@@ -3,6 +3,7 @@ import tkinter as tk
 from tkinter import filedialog
 import questionary
 from questionary import Choice
+import speech_recognition as sr
 
 galeria = []
 
@@ -22,6 +23,32 @@ def menuPrincipal():
 
     return opcao
 
+#Função que retorna audio gravado transcrito
+def gravarAudio():
+    reconhecedor = sr.Recognizer()
+
+    with sr.Microphone() as source:
+        print("\n🎤 Ajustando o ruído de fundo... aguarde um segundo.")
+        reconhecedor.adjust_for_ambient_noise(source, duration=1)
+
+        print("🔴 Pode falar! Estou ouvindo...")
+
+        try:
+            audio = reconhecedor.listen(source, timeout=5, phrase_time_limit=20)
+            print("⏳ Processando o áudio...")
+            texto_transcrito = reconhecedor.recognize_google(audio, language='pt-BR')
+            return texto_transcrito
+
+        except sr.UnknownValueError:
+            print("❌ Desculpe, o áudio ficou confuso e não foi possível entender.")
+            return None
+        except sr.RequestError:
+            print("❌ Erro de conexão. Verifique sua internet.")
+            return None
+        except sr.WaitTimeoutError:
+            print("❌ Você demorou muito para falar. Operação cancelada.")
+            return None
+
 # Função da Opção 1 - Salvar imagem com anotação
 def adicionarAnotacao():
     print("Vamos adicionar uma nova anotação ao SnapNote!")
@@ -38,9 +65,21 @@ def adicionarAnotacao():
 
     if caminho_foto:
         print(f"\nImagem selecionada: {caminho_foto}")
-        texto_anotacao = input("Digite a sua anotação para este print: ")
 
-        galeria.append({"imagem": caminho_foto, "anotacao": texto_anotacao})
+        opcao = questionary.select(
+            '\nComo pretende adicionar a anotação ?',
+            choices=[
+                Choice(title="Gravar audio.", value=1),
+                Choice(title="Digitar anotação.", value=2)
+            ]
+        ).ask()
+
+        if opcao == 1:
+            textoAnotacao = gravarAudio()
+        else:
+            textoAnotacao = input("Digite a sua anotação para este print: ")
+
+        galeria.append({"imagem": caminho_foto, "anotacao": textoAnotacao})
         print("✅ Anotação salva com sucesso!")
     else:
         print("❌ Operação cancelada. Nenhuma imagem foi selecionada.")
