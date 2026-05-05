@@ -4,18 +4,54 @@ import subprocess
 import tkinter as tk
 from tkinter import filedialog
 import questionary
-from questionary import Choice
+from questionary import Choice, Style
 import speech_recognition as sr
 import shutil
+
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich.theme import Theme
+
+# Configuração do Tema e Console da Rich
+tema_customizado = Theme({
+    "info": "cyan",
+    "warning": "yellow",
+    "error": "bold red",
+    "success": "bold green",
+    "highlight": "bold magenta"
+})
+console = Console(theme=tema_customizado)
+
+# Estilização do Questionary
+estilo_menu = Style([
+    ('qmark', 'fg:#00ffff bold'),
+    ('question', 'bold'),
+    ('answer', 'fg:#00ff00 bold'),
+    ('pointer', 'fg:#ff00ff bold'),
+    ('highlighted', 'fg:#00ffff bold'),
+    ('selected', 'fg:#00ff00'),
+    ('separator', 'fg:#cc5454'),
+    ('instruction', 'fg:#858585 italic')
+])
 
 galeria = []
 palavrasChaves = []
 
+
 # Exibe o menu principal e retorna a opção escolhida pelo usuário.
 def menuPrincipal():
-    menuHeader = '\n=======================================\n       SNAPNOTE - MENU PRINCIPAL\n=======================================\n'
+    painel = Panel.fit(
+        "[bold cyan]Bem-vindo ao sistema de organização visual![/bold cyan]\n"
+        "Selecione uma das opções abaixo para gerenciar sua galeria.",
+        title="[bold magenta]📸 SNAPNOTE - MENU PRINCIPAL[/bold magenta]",
+        border_style="magenta",
+        padding=(1, 2)
+    )
+    console.print(painel)
+
     opcao = questionary.select(
-        menuHeader,
+        'O que você deseja fazer?',
         choices=[
             Choice(title="Selecionar imagem e gerar uma anotação.", value=1),
             Choice(title="Exibir anotações.", value=2),
@@ -23,68 +59,72 @@ def menuPrincipal():
             Choice(title="Controle de palavras-chave.", value=4),
             Choice(title="Limpar o terminal.", value=5),
             Choice(title="Finalizar execução", value=6),
-        ]
+        ],
+        style=estilo_menu
     ).ask()
 
     return opcao
+
 
 # Grava o áudio do microfone, transcreve para texto usando o Google e retorna o resultado.
 def gravarAudio():
     reconhecedor = sr.Recognizer()
 
     with sr.Microphone() as source:
-        print("\n🎤 Ajustando o ruído de fundo... aguarde um instante.")
+        console.print("\n[info]🎤 Ajustando o ruído de fundo... aguarde um instante.[/info]")
         reconhecedor.adjust_for_ambient_noise(source, duration=1)
 
-        print("🔴 Pode falar! Estou ouvindo...")
+        console.print("[highlight]🔴 Pode falar! Estou ouvindo...[/highlight]")
 
         try:
             audio = reconhecedor.listen(source, timeout=5, phrase_time_limit=20)
-            print("⏳ Processando o áudio...")
+            console.print("[info]⏳ Processando o áudio...[/info]")
             textoTranscrito = reconhecedor.recognize_google(audio, language='pt-BR')
             return textoTranscrito
 
         except sr.UnknownValueError:
-            print("❌ Desculpe, o áudio ficou confuso e não foi possível entender.")
+            console.print("[error]❌ Desculpe, o áudio ficou confuso e não foi possível entender.[/error]")
             return None
         except sr.RequestError:
-            print("❌ Erro de conexão. Verifique sua internet.")
+            console.print("[error]❌ Erro de conexão. Verifique sua internet.[/error]")
             return None
         except sr.WaitTimeoutError:
-            print("❌ Você demorou muito para falar. Operação cancelada.")
+            console.print("[error]❌ Você demorou muito para falar. Operação cancelada.[/error]")
             return None
+
 
 # Abre o explorador para selecionar uma foto, recebe a anotação (texto ou voz) e salva na galeria.
 def adicionarAnotacao():
-    print("\n📸 Vamos adicionar uma nova anotação ao SnapNote!")
+    console.print("\n[highlight]📸 Vamos adicionar uma nova anotação ao SnapNote![/highlight]")
 
     root = tk.Tk()
     root.withdraw()
     root.attributes('-topmost', True)
 
-    print("Aguardando seleção da imagem na janela do explorador...")
+    console.print("[info]Aguardando seleção da imagem na janela do explorador...[/info]")
     caminhoFoto = filedialog.askopenfilename(
         title="Selecione a Imagem para o SnapNote",
         filetypes=[("Arquivos de Imagem", "*.png;*.jpg;*.jpeg")]
     )
 
     if caminhoFoto:
-        print(f"✅ Imagem selecionada: {caminhoFoto}")
+        console.print(f"[success]✅ Imagem selecionada:[/success] {caminhoFoto}")
 
         opcao = questionary.select(
             '\nComo deseja inserir a anotação?',
             choices=[
                 Choice(title="Gravar áudio.", value=1),
                 Choice(title="Digitar anotação.", value=2)
-            ]
+            ],
+            style=estilo_menu
         ).ask()
 
         if opcao == 1:
             textoAnotacao = gravarAudio()
             if textoAnotacao is None:
-                textoAnotacao = input("\n📝 Digite a sua anotação para esta imagem: ")
+                textoAnotacao = console.input("\n[info]📝 Digite a sua anotação para esta imagem:[/info] ")
         else:
-            textoAnotacao = input("\n📝 Digite a sua anotação para esta imagem: ")
+            textoAnotacao = console.input("\n[info]📝 Digite a sua anotação para esta imagem:[/info] ")
 
         for i in palavrasChaves:
             if i in textoAnotacao.lower():
@@ -95,44 +135,59 @@ def adicionarAnotacao():
                     caminhoFoto = novoCaminho
 
         galeria.append({"imagem": caminhoFoto, "anotacao": textoAnotacao})
-        print("\n✅ Anotação salva com sucesso!")
+        console.print("\n[success]✅ Anotação salva com sucesso![/success]")
     else:
-        print("\n❌ Operação cancelada. Nenhuma imagem foi selecionada.")
+        console.print("\n[error]❌ Operação cancelada. Nenhuma imagem foi selecionada.[/error]")
+
 
 # Percorre a lista da galeria e exibe todas as imagens e anotações salvas.
 def exibirAnotacoes():
     if not galeria:
-        print("\n⚠️ Sua galeria está vazia. Adicione uma anotação primeiro!")
+        console.print("\n[warning]⚠️ Sua galeria está vazia. Adicione uma anotação primeiro![/warning]")
         return
 
-    print('\n--- 🖼️ IMAGENS SALVAS ---')
+    tabela = Table(title="🖼️ IMAGENS SALVAS", show_header=True, header_style="bold magenta", border_style="cyan")
+    tabela.add_column("Caminho do Arquivo", style="cyan", overflow="fold")
+    tabela.add_column("Anotação", style="white")
+
     for i in galeria:
-        print(f'📁 Caminho: {i["imagem"]}\n📝 Anotação: {i["anotacao"]}\n{"-" * 40}')
+        tabela.add_row(i["imagem"], i["anotacao"])
+
+    console.print("\n")
+    console.print(tabela)
+
 
 # Busca por uma palavra específica dentro das anotações e exibe os resultados correspondentes.
 def buscarAnotacao():
     if not galeria:
-        print("\n⚠️ Sua galeria está vazia. Adicione uma anotação primeiro!")
+        console.print("\n[warning]⚠️ Sua galeria está vazia. Adicione uma anotação primeiro![/warning]")
         return
 
-    filtro = input('\n🔎 Digite o termo que deseja buscar: ').lower()
+    filtro = console.input('\n[info]🔎 Digite o termo que deseja buscar:[/info] ').lower()
     resultadosEncontrados = 0
 
-    print(f"\n--- 🔎 RESULTADOS PARA '{filtro.upper()}' ---")
+    tabela = Table(title=f"🔎 RESULTADOS PARA '{filtro.upper()}'", show_header=True, header_style="bold magenta",
+                   border_style="cyan")
+    tabela.add_column("Caminho do Arquivo", style="cyan", overflow="fold")
+    tabela.add_column("Anotação", style="white")
 
     for item in galeria:
         if filtro in item['anotacao'].lower():
-            print(f'📁 Caminho: {item["imagem"]}\n📝 Anotação: {item["anotacao"]}\n{"-" * 40}')
+            tabela.add_row(item["imagem"], item["anotacao"])
             resultadosEncontrados += 1
 
     if resultadosEncontrados == 0:
-        print("\n❌ Nenhuma anotação encontrada para esta busca.")
+        console.print("\n[error]❌ Nenhuma anotação encontrada para esta busca.[/error]")
     else:
-        print(f"\n✅ {resultadosEncontrados} resultado(s) encontrado(s)!")
+        console.print("\n")
+        console.print(tabela)
+        console.print(f"[success]✅ {resultadosEncontrados} resultado(s) encontrado(s)![/success]")
+
 
 # Limpa o texto do terminal de acordo com o sistema operacional (Windows ou Mac/Linux).
 def limparTerminal():
     os.system('cls' if os.name == 'nt' else 'clear')
+
 
 # Copia de forma segura um arquivo de imagem da origem para o destino.
 def copiarImagem(origem, destino):
@@ -142,11 +197,12 @@ def copiarImagem(origem, destino):
             return novoCaminho
 
         except Exception as erro:
-            print(f"\n❌ Ocorreu um erro inesperado ao copiar a imagem: {origem}")
+            console.print(f"\n[error]❌ Ocorreu um erro inesperado ao copiar a imagem: {origem}[/error]")
             return None
     else:
-        print("\n❌ Erro: O arquivo original não foi encontrado no caminho especificado.")
+        console.print("\n[error]❌ Erro: O arquivo original não foi encontrado no caminho especificado.[/error]")
         return None
+
 
 # Gerencia o submenu de palavras-chave, permitindo cadastrar, consultar, apagar ou visualizar pastas.
 def cadPalavraChave():
@@ -160,17 +216,18 @@ def cadPalavraChave():
                 Choice(title="Visualizar pasta da palavra-chave.", value=4),
                 Choice(title="Entender como funciona.", value=5),
                 Choice(title="Voltar ao menu principal.", value=6)
-            ]
+            ],
+            style=estilo_menu
         ).ask()
 
         if opcao == 1:
-            palavra = input("\n🔑 Digite a nova palavra-chave: ").strip().lower()
+            palavra = console.input("\n[info]🔑 Digite a nova palavra-chave:[/info] ").strip().lower()
 
             if not palavra:
-                print("\n❌ Formato inválido! A palavra-chave não pode ser vazia.")
+                console.print("\n[error]❌ Formato inválido! A palavra-chave não pode ser vazia.[/error]")
             elif ' ' in palavra:
-                print(
-                    "\n❌ Formato inválido! A palavra-chave deve ser uma única palavra (sem espaços). Você pode usar '-' ou '_'.")
+                console.print(
+                    "\n[error]❌ Formato inválido! A palavra-chave deve ser uma única palavra (sem espaços). Você pode usar '-' ou '_'.[/error]")
             elif palavra not in palavrasChaves:
                 palavrasChaves.append(palavra)
                 for i in galeria:
@@ -180,33 +237,41 @@ def cadPalavraChave():
                         novoCaminho = copiarImagem(i['imagem'], destinoAbsoluto)
                         if novoCaminho:
                             i['imagem'] = novoCaminho
-                print(
-                    f'\n✅ Palavra-chave \'{palavra}\' cadastrada com sucesso!\n📁 As imagens correspondentes serão organizadas em: {os.path.join(os.getcwd(), palavra)}')
+                console.print(f"\n[success]✅ Palavra-chave '{palavra}' cadastrada com sucesso![/success]")
+                console.print(
+                    f"[info]📁 As imagens correspondentes serão organizadas em: {os.path.join(os.getcwd(), palavra)}[/info]")
             else:
-                print("\n⚠️ Esta palavra-chave já está cadastrada.")
+                console.print("\n[warning]⚠️ Esta palavra-chave já está cadastrada.[/warning]")
 
         elif opcao == 2:
             if not palavrasChaves:
-                print("\n⚠️ Nenhuma palavra-chave cadastrada ainda.")
+                console.print("\n[warning]⚠️ Nenhuma palavra-chave cadastrada ainda.[/warning]")
             else:
-                print('\n--- 🔑 PALAVRAS-CHAVES CADASTRADAS ---')
-                for i in palavrasChaves:
-                    print(f'🔹 {i.capitalize()}')
-                print("-" * 40)
+                painel_chaves = Panel(
+                    "\n".join([f"🔹 {p.capitalize()}" for p in palavrasChaves]),
+                    title="[bold magenta]🔑 PALAVRAS-CHAVES CADASTRADAS[/bold magenta]",
+                    expand=False,
+                    border_style="cyan"
+                )
+                console.print("\n")
+                console.print(painel_chaves)
 
         elif opcao == 3:
             if not palavrasChaves:
-                print("\n⚠️ Nenhuma palavra-chave cadastrada para apagar.")
+                console.print("\n[warning]⚠️ Nenhuma palavra-chave cadastrada para apagar.[/warning]")
             else:
                 opcoesExclusao = [Choice(title=p.capitalize(), value=p) for p in palavrasChaves]
                 palavraApagar = questionary.select(
                     "\n🗑️ Qual palavra-chave deseja apagar?",
-                    choices=opcoesExclusao
+                    choices=opcoesExclusao,
+                    style=estilo_menu
                 ).ask()
 
                 if palavraApagar:
                     confirmacao = questionary.confirm(
-                        f"Tem certeza que deseja apagar a palavra '{palavraApagar}' e excluir a sua pasta?").ask()
+                        f"Tem certeza que deseja apagar a palavra '{palavraApagar}' e excluir a sua pasta?",
+                        style=estilo_menu
+                    ).ask()
 
                     if confirmacao:
                         palavrasChaves.remove(palavraApagar)
@@ -215,18 +280,20 @@ def cadPalavraChave():
                         if os.path.exists(caminhoPasta):
                             shutil.rmtree(caminhoPasta, ignore_errors=True)
 
-                        print(f"\n✅ Palavra-chave '{palavraApagar}' e sua pasta foram removidas com sucesso!")
+                        console.print(
+                            f"\n[success]✅ Palavra-chave '{palavraApagar}' e sua pasta foram removidas com sucesso![/success]")
                     else:
-                        print("\n❌ Operação cancelada.")
+                        console.print("\n[info]❌ Operação cancelada.[/info]")
 
         elif opcao == 4:
             if not palavrasChaves:
-                print("\n⚠️ Nenhuma palavra-chave cadastrada para visualizar.")
+                console.print("\n[warning]⚠️ Nenhuma palavra-chave cadastrada para visualizar.[/warning]")
             else:
                 opcoesVisualizar = [Choice(title=p.capitalize(), value=p) for p in palavrasChaves]
                 palavraVisualizar = questionary.select(
                     "\n📂 Qual pasta de palavra-chave deseja abrir?",
-                    choices=opcoesVisualizar
+                    choices=opcoesVisualizar,
+                    style=estilo_menu
                 ).ask()
 
                 if palavraVisualizar:
@@ -239,18 +306,24 @@ def cadPalavraChave():
                             subprocess.Popen(['open', caminhoPasta])
                         else:
                             subprocess.Popen(['xdg-open', caminhoPasta])
-                        print(f"\n✅ Abrindo o explorador na pasta: {caminhoPasta}")
+                        console.print(f"\n[success]✅ Abrindo o explorador na pasta:[/success] {caminhoPasta}")
                     else:
-                        print(
-                            "\n⚠️ A pasta para esta palavra-chave ainda não existe no disco (nenhuma imagem foi vinculada a ela ainda).")
+                        console.print(
+                            "\n[warning]⚠️ A pasta para esta palavra-chave ainda não existe no disco (nenhuma imagem foi vinculada a ela ainda).[/warning]")
 
         elif opcao == 5:
-            print('\n--- 💡 MÓDULO DE PALAVRAS-CHAVE ---')
-            print('Cadastre termos para organizar suas imagens de forma automática.')
-            print('O sistema reconhece os termos nas suas anotações e separa os arquivos em suas respectivas pastas.')
-            print("-" * 35)
+            info_painel = Panel(
+                "Cadastre termos para organizar suas imagens de forma automática.\n"
+                "O sistema reconhece os termos nas suas anotações e separa os arquivos em suas respectivas pastas.",
+                title="💡 [bold yellow]MÓDULO DE PALAVRAS-CHAVE[/bold yellow]",
+                border_style="yellow",
+                expand=False
+            )
+            console.print("\n")
+            console.print(info_painel)
         else:
             break
+
 
 # Loop principal de execução do programa
 while True:
@@ -266,6 +339,6 @@ while True:
         cadPalavraChave()
     elif opcao == 5:
         limparTerminal()
-    elif opcao == 6:
-        print('\n👋 Encerrando o SnapNote. Até logo!\n')
+    elif opcao == 6 or opcao is None:
+        console.print('\n[highlight]👋 Encerrando o SnapNote. Até logo![/highlight]\n')
         break
