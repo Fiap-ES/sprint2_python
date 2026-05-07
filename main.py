@@ -1,46 +1,74 @@
-import os
-import sys
-import subprocess
+#Olha só, não apaguei nada, então não reclame
+import os, sys, subprocess, shutil
 import tkinter as tk
 from tkinter import filedialog
 import questionary
 from questionary import Choice, Style
 import speech_recognition as sr
-import shutil
 
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.theme import Theme
+#Estou adicionando para um uso interessante
+from rich.live import Live
+from time import sleep
+from rich.align import Align
+
 
 # Configuração do Tema e Console da Rich
+#Estou mudando as cores, quero opinião boa ein
 tema_customizado = Theme({
-    "info": "cyan",
-    "warning": "yellow",
-    "error": "bold red",
-    "success": "bold green",
+    "info": "italic grey70",
+    "warning": "bold gold1",
+    "error": "bold indian_red1",
+    "success": "bold spring_green3",
     "highlight": "bold magenta"
 })
 console = Console(theme=tema_customizado)
 
 # Estilização do Questionary
+#Mudei o qmark, answer, highlighted, selected, instruction
 estilo_menu = Style([
-    ('qmark', 'fg:#00ffff bold'),
+    ('qmark', 'fg:#87ceeb bold'),
     ('question', 'bold'),
-    ('answer', 'fg:#00ff00 bold'),
+    ('answer', 'fg:#00ff7f bold'),
     ('pointer', 'fg:#ff00ff bold'),
-    ('highlighted', 'fg:#00ffff bold'),
-    ('selected', 'fg:#00ff00'),
+    ('highlighted', 'fg:#87ceeb underline'),
+    ('selected', 'fg:#00ff7f'),
     ('separator', 'fg:#cc5454'),
-    ('instruction', 'fg:#858585 italic')
+    ('instruction', 'fg:#616161 italic')
 ])
 
 galeria = []
 palavrasChaves = []
 
+#Adicionando um tipo de "banner"
+def exibir_banner():
+    banner = """
+    ┏━┓┏━┓┏━┓┏━┓┏┓╻┏━┓╺┳╸┏━╸
+    ┗━┓┃╻┃┣━┫┣━┛┃┗┫┃ ┃ ┃ ┣╸ 
+    ┗━┛╹┗╹╹ ╹╹  ╹ ╹┗━┛ ╹ ┗━╸
+    """
+
+    # Removi o Align.center e o padding lateral exagerado, que eu tinha feito e ninguém viu, só o Bruno mesmo
+    painel_banner = Panel(
+        banner,
+        subtitle="[bold]v1.0 - Sua Galeria Inteligente[/bold]",
+        border_style="magenta",
+        expand=False,  # Faz o painel se ajustar ao tamanho do texto, não à tela toda. Vai ficar nice demais
+        width=50,  # Estou forçando o painel ficar largo o suficiente, pois estava cortando o título ;-;
+        padding=(1, 5)  # Padding menor para não empurrar o texto, eu também mexi nisso anteriormente e não ficou legal
+    )
+
+    # Imprime direto, sem a função Align.center envolta, para quem não sabe eu também usei align
+    console.print(painel_banner)
+
 
 # Exibe o menu principal e retorna a opção escolhida pelo usuário.
 def menuPrincipal():
+    exibir_banner()
+
     painel = Panel.fit(
         "[bold cyan]Bem-vindo ao sistema de organização visual![/bold cyan]\n"
         "Selecione uma das opções abaixo para gerenciar sua galeria.",
@@ -71,15 +99,17 @@ def gravarAudio():
     reconhecedor = sr.Recognizer()
 
     with sr.Microphone() as source:
-        console.print("\n[info]🎤 Ajustando o ruído de fundo... aguarde um instante.[/info]")
-        reconhecedor.adjust_for_ambient_noise(source, duration=1)
+        #Usei status para deixar mais "vivo"? Algo do tipo
+        with console.status("\n[info]🎤 Ajustando o ruído de fundo... aguarde um instante.[/info]", spinner="bouncingBall"):
+            reconhecedor.adjust_for_ambient_noise(source, duration=0.8)
 
         console.print("[highlight]🔴 Pode falar! Estou ouvindo...[/highlight]")
 
         try:
             audio = reconhecedor.listen(source, timeout=5, phrase_time_limit=20)
-            console.print("[info]⏳ Processando o áudio...[/info]")
-            textoTranscrito = reconhecedor.recognize_google(audio, language='pt-BR')
+            #Também usei status
+            with console.status("[info]⏳ Processando o áudio...[/info]", spinner="arc"):
+                textoTranscrito = reconhecedor.recognize_google(audio, language='pt-BR')
             return textoTranscrito
 
         except sr.UnknownValueError:
@@ -325,6 +355,20 @@ def cadPalavraChave():
             break
 
 
+#Criando uma despedida "melhor"
+def despedida_animada():
+    mensagens = ["Limpando cache...", "Organizando arquivos...", "SnapNote desligando..."]
+
+    with Live(console=console, refresh_per_second=4) as live:
+        for msg in mensagens:
+            live.update(Align.center(Panel(f"[bold magenta]{msg}[/bold magenta]", width=40)))
+            sleep(0.8)
+
+    # Limpa tudo e deixa uma mensagem final mais boa para a visão
+    limparTerminal()
+    console.print('\n[highlight]👋 Encerrando o SnapNote. Até logo![/highlight]\n')
+
+
 # Loop principal de execução do programa
 while True:
     opcao = menuPrincipal()
@@ -340,5 +384,5 @@ while True:
     elif opcao == 5:
         limparTerminal()
     elif opcao == 6 or opcao is None:
-        console.print('\n[highlight]👋 Encerrando o SnapNote. Até logo![/highlight]\n')
+        despedida_animada()
         break
