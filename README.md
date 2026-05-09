@@ -34,4 +34,4 @@ Clone o projeto ou certifique-se de que o código fonte do projeto está salvo e
 **2. Instale as dependências:**
 Abra o seu terminal na pasta do projeto e execute o comando abaixo para baixar todas as bibliotecas necessárias:
 ```bash
-pip install questionary SpeechRecognition rich pyaudio
+pip install questionary SpeechRecognition rich pyaudio opencv-python
