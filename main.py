@@ -1,74 +1,56 @@
-#Olha só, não apaguei nada, então não reclame
-import os, sys, subprocess, shutil
+import os
+import sys
+import subprocess
 import tkinter as tk
 from tkinter import filedialog
 import questionary
 from questionary import Choice, Style
 import speech_recognition as sr
+import shutil
+import cv2
+from datetime import datetime
 
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.theme import Theme
-#Estou adicionando para um uso interessante
-from rich.live import Live
-from time import sleep
-from rich.align import Align
-
 
 # Configuração do Tema e Console da Rich
-#Estou mudando as cores, quero opinião boa ein
 tema_customizado = Theme({
-    "info": "italic grey70",
-    "warning": "bold gold1",
-    "error": "bold indian_red1",
-    "success": "bold spring_green3",
+    "info": "cyan",
+    "warning": "yellow",
+    "error": "bold red",
+    "success": "bold green",
     "highlight": "bold magenta"
 })
 console = Console(theme=tema_customizado)
 
 # Estilização do Questionary
-#Mudei o qmark, answer, highlighted, selected, instruction
 estilo_menu = Style([
-    ('qmark', 'fg:#87ceeb bold'),
+    ('qmark', 'fg:#00ffff bold'),
     ('question', 'bold'),
-    ('answer', 'fg:#00ff7f bold'),
+    ('answer', 'fg:#00ff00 bold'),
     ('pointer', 'fg:#ff00ff bold'),
-    ('highlighted', 'fg:#87ceeb underline'),
-    ('selected', 'fg:#00ff7f'),
+    ('highlighted', 'fg:#00ffff bold'),
+    ('selected', 'fg:#00ff00'),
     ('separator', 'fg:#cc5454'),
-    ('instruction', 'fg:#616161 italic')
+    ('instruction', 'fg:#858585 italic')
 ])
 
 galeria = []
 palavrasChaves = []
 
-#Adicionando um tipo de "banner"
-def exibir_banner():
-    banner = """
-    ┏━┓┏━┓┏━┓┏━┓┏┓╻┏━┓╺┳╸┏━╸
-    ┗━┓┃╻┃┣━┫┣━┛┃┗┫┃ ┃ ┃ ┣╸ 
-    ┗━┛╹┗╹╹ ╹╹  ╹ ╹┗━┛ ╹ ┗━╸
-    """
+# Pasta onde as fotos tiradas pela câmera serão salvas
+pastaFotos = os.path.join(os.getcwd(), "fotos_capturadas")
 
-    # Removi o Align.center e o padding lateral exagerado, que eu tinha feito e ninguém viu, só o Bruno mesmo
-    painel_banner = Panel(
-        banner,
-        subtitle="[bold]v1.0 - Sua Galeria Inteligente[/bold]",
-        border_style="magenta",
-        expand=False,  # Faz o painel se ajustar ao tamanho do texto, não à tela toda. Vai ficar nice demais
-        width=50,  # Estou forçando o painel ficar largo o suficiente, pois estava cortando o título ;-;
-        padding=(1, 5)  # Padding menor para não empurrar o texto, eu também mexi nisso anteriormente e não ficou legal
-    )
 
-    # Imprime direto, sem a função Align.center envolta, para quem não sabe eu também usei align
-    console.print(painel_banner)
+# Garante que a pasta de fotos capturadas existe
+def garantirPastaFotos():
+    os.makedirs(pastaFotos, exist_ok=True)
 
 
 # Exibe o menu principal e retorna a opção escolhida pelo usuário.
 def menuPrincipal():
-    exibir_banner()
-
     painel = Panel.fit(
         "[bold cyan]Bem-vindo ao sistema de organização visual![/bold cyan]\n"
         "Selecione uma das opções abaixo para gerenciar sua galeria.",
@@ -81,12 +63,13 @@ def menuPrincipal():
     opcao = questionary.select(
         'O que você deseja fazer?',
         choices=[
-            Choice(title="Selecionar imagem e gerar uma anotação.", value=1),
-            Choice(title="Exibir anotações.", value=2),
-            Choice(title="Buscar imagem pela anotação.", value=3),
-            Choice(title="Controle de palavras-chave.", value=4),
-            Choice(title="Limpar o terminal.", value=5),
-            Choice(title="Finalizar execução", value=6),
+            Choice(title="📷  Tirar foto agora e adicionar anotação.", value=1),
+            Choice(title="🖼️  Selecionar imagem e gerar uma anotação.", value=2),
+            Choice(title="📋  Exibir anotações.", value=3),
+            Choice(title="🔎  Buscar imagem pela anotação.", value=4),
+            Choice(title="🔑  Controle de palavras-chave.", value=5),
+            Choice(title="🧹  Limpar o terminal.", value=6),
+            Choice(title="🚪  Finalizar execução", value=7),
         ],
         style=estilo_menu
     ).ask()
@@ -94,22 +77,127 @@ def menuPrincipal():
     return opcao
 
 
+# Abre a câmera ao vivo, mostra preview e captura foto ao pressionar ESPAÇO ou ENTER.
+# Retorna o caminho da imagem salva, ou None se cancelado.
+def tirarFoto():
+    garantirPastaFotos()
+
+    console.print("\n[highlight]📷 Abrindo câmera... Aguarde.[/highlight]")
+    console.print("[info]  → Pressione [ESPAÇO] ou [ENTER] para capturar a foto.[/info]")
+    console.print("[info]  → Pressione [ESC] ou [Q] para cancelar.[/info]\n")
+
+    cap = cv2.VideoCapture(0)
+
+    if not cap.isOpened():
+        console.print("[error]❌ Não foi possível acessar a câmera. Verifique se ela está conectada.[/error]")
+        return None
+
+    # Configura resolução (tenta 1280x720, cai para padrão se não suportado)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+
+    fotoCapturada = None
+    nomeJanela = "SnapNote - Camera ao Vivo  |  [ESPACO/ENTER] Capturar  |  [ESC/Q] Cancelar"
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            console.print("[error]❌ Erro ao ler frame da câmera.[/error]")
+            break
+
+        # Espelha horizontalmente para efeito de espelho natural
+        frameEspelhado = cv2.flip(frame, 1)
+
+        # Overlay com instruções na parte inferior do frame
+        altura, largura = frameEspelhado.shape[:2]
+        overlay = frameEspelhado.copy()
+        cv2.rectangle(overlay, (0, altura - 50), (largura, altura), (0, 0, 0), -1)
+        cv2.addWeighted(overlay, 0.55, frameEspelhado, 0.45, 0, frameEspelhado)
+
+        textoInstrucao = "[ESPACO / ENTER] Capturar   [ESC / Q] Cancelar"
+        cv2.putText(
+            frameEspelhado,
+            textoInstrucao,
+            (20, altura - 17),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            (180, 255, 180),
+            1,
+            cv2.LINE_AA
+        )
+
+        # Indicador de gravação ao vivo (ponto vermelho pulsante via frame count)
+        cv2.circle(frameEspelhado, (largura - 28, 28), 10, (0, 0, 220), -1)
+        cv2.putText(
+            frameEspelhado,
+            "AO VIVO",
+            (largura - 90, 34),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            (0, 0, 220),
+            1,
+            cv2.LINE_AA
+        )
+
+        cv2.imshow(nomeJanela, frameEspelhado)
+
+        tecla = cv2.waitKey(1) & 0xFF
+
+        # ESPAÇO (32) ou ENTER (13) → capturar
+        if tecla in (32, 13):
+            # Salva o frame original (sem espelho e sem overlay) para melhor qualidade
+            ret2, frameOriginal = cap.read()
+            if ret2:
+                frameSalvar = cv2.flip(frameOriginal, 1)
+            else:
+                frameSalvar = frameEspelhado
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            nomeArquivo = f"snapnote_{timestamp}.jpg"
+            caminhoCompleto = os.path.join(pastaFotos, nomeArquivo)
+
+            cv2.imwrite(caminhoCompleto, frameSalvar, [cv2.IMWRITE_JPEG_QUALITY, 95])
+            fotoCapturada = caminhoCompleto
+
+            # Feedback visual: pisca verde por 0.4s
+            flash = frameSalvar.copy()
+            flash[:] = (100, 255, 100)
+            cv2.addWeighted(flash, 0.35, frameSalvar, 0.65, 0, frameSalvar)
+            cv2.imshow(nomeJanela, frameSalvar)
+            cv2.waitKey(400)
+            break
+
+        # ESC (27) ou Q (113) → cancelar
+        elif tecla in (27, ord('q'), ord('Q')):
+            console.print("\n[warning]⚠️ Captura cancelada pelo usuário.[/warning]")
+            break
+
+        # Fecha se janela for fechada pelo botão X
+        if cv2.getWindowProperty(nomeJanela, cv2.WND_PROP_VISIBLE) < 1:
+            console.print("\n[warning]⚠️ Janela fechada. Captura cancelada.[/warning]")
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+    # Aguarda janela fechar completamente (necessário em alguns sistemas)
+    cv2.waitKey(1)
+
+    return fotoCapturada
+
 # Grava o áudio do microfone, transcreve para texto usando o Google e retorna o resultado.
 def gravarAudio():
     reconhecedor = sr.Recognizer()
 
     with sr.Microphone() as source:
-        #Usei status para deixar mais "vivo"? Algo do tipo
-        with console.status("\n[info]🎤 Ajustando o ruído de fundo... aguarde um instante.[/info]", spinner="bouncingBall"):
-            reconhecedor.adjust_for_ambient_noise(source, duration=0.8)
+        console.print("\n[info]🎤 Ajustando o ruído de fundo... aguarde um instante.[/info]")
+        reconhecedor.adjust_for_ambient_noise(source, duration=1)
 
         console.print("[highlight]🔴 Pode falar! Estou ouvindo...[/highlight]")
 
         try:
             audio = reconhecedor.listen(source, timeout=5, phrase_time_limit=20)
-            #Também usei status
-            with console.status("[info]⏳ Processando o áudio...[/info]", spinner="arc"):
-                textoTranscrito = reconhecedor.recognize_google(audio, language='pt-BR')
+            console.print("[info]⏳ Processando o áudio...[/info]")
+            textoTranscrito = reconhecedor.recognize_google(audio, language='pt-BR')
             return textoTranscrito
 
         except sr.UnknownValueError:
@@ -123,52 +211,69 @@ def gravarAudio():
             return None
 
 
-# Abre o explorador para selecionar uma foto, recebe a anotação (texto ou voz) e salva na galeria.
-def adicionarAnotacao():
-    console.print("\n[highlight]📸 Vamos adicionar uma nova anotação ao SnapNote![/highlight]")
+# Tira foto ao vivo com a câmera e repassa o caminho para adicionarAnotacao.
+def tirarFotoEAnotar():
+    console.print("\n[highlight]📷 Modo câmera ao vivo do SnapNote![/highlight]")
 
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes('-topmost', True)
+    caminhoFoto = tirarFoto()
 
-    console.print("[info]Aguardando seleção da imagem na janela do explorador...[/info]")
-    caminhoFoto = filedialog.askopenfilename(
-        title="Selecione a Imagem para o SnapNote",
-        filetypes=[("Arquivos de Imagem", "*.png;*.jpg;*.jpeg")]
-    )
+    if not caminhoFoto:
+        console.print("[error]❌ Nenhuma foto foi capturada.[/error]")
+        return
 
-    if caminhoFoto:
+    console.print(f"\n[success]✅ Foto salva em:[/success] {caminhoFoto}")
+    console.print(f"[info]📁 Pasta de fotos capturadas: {pastaFotos}[/info]")
+
+    adicionarAnotacao(caminhoFoto)
+
+
+# Abre o explorador para selecionar uma foto (se não receber caminho), recebe a anotação e salva na galeria.
+def adicionarAnotacao(caminhoFoto=None):
+    if caminhoFoto is None:
+        console.print("\n[highlight]🖼️ Vamos adicionar uma nova anotação ao SnapNote![/highlight]")
+
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes('-topmost', True)
+
+        console.print("[info]Aguardando seleção da imagem na janela do explorador...[/info]")
+        caminhoFoto = filedialog.askopenfilename(
+            title="Selecione a Imagem para o SnapNote",
+            filetypes=[("Arquivos de Imagem", "*.png;*.jpg;*.jpeg")]
+        )
+
+        if not caminhoFoto:
+            console.print("\n[error]❌ Operação cancelada. Nenhuma imagem foi selecionada.[/error]")
+            return
+
         console.print(f"[success]✅ Imagem selecionada:[/success] {caminhoFoto}")
 
-        opcao = questionary.select(
-            '\nComo deseja inserir a anotação?',
-            choices=[
-                Choice(title="Gravar áudio.", value=1),
-                Choice(title="Digitar anotação.", value=2)
-            ],
-            style=estilo_menu
-        ).ask()
+    opcao = questionary.select(
+        '\nComo deseja inserir a anotação?',
+        choices=[
+            Choice(title="Gravar áudio.", value=1),
+            Choice(title="Digitar anotação.", value=2)
+        ],
+        style=estilo_menu
+    ).ask()
 
-        if opcao == 1:
-            textoAnotacao = gravarAudio()
-            if textoAnotacao is None:
-                textoAnotacao = console.input("\n[info]📝 Digite a sua anotação para esta imagem:[/info] ")
-        else:
+    if opcao == 1:
+        textoAnotacao = gravarAudio()
+        if textoAnotacao is None:
             textoAnotacao = console.input("\n[info]📝 Digite a sua anotação para esta imagem:[/info] ")
-
-        for i in palavrasChaves:
-            if i in textoAnotacao.lower():
-                destinoAbsoluto = os.path.join(os.getcwd(), i)
-                os.makedirs(destinoAbsoluto, exist_ok=True)
-                novoCaminho = copiarImagem(caminhoFoto, destinoAbsoluto)
-                if novoCaminho:
-                    caminhoFoto = novoCaminho
-
-        galeria.append({"imagem": caminhoFoto, "anotacao": textoAnotacao})
-        console.print("\n[success]✅ Anotação salva com sucesso![/success]")
     else:
-        console.print("\n[error]❌ Operação cancelada. Nenhuma imagem foi selecionada.[/error]")
+        textoAnotacao = console.input("\n[info]📝 Digite a sua anotação para esta imagem:[/info] ")
 
+    for i in palavrasChaves:
+        if i in textoAnotacao.lower():
+            destinoAbsoluto = os.path.join(os.getcwd(), i)
+            os.makedirs(destinoAbsoluto, exist_ok=True)
+            novoCaminho = copiarImagem(caminhoFoto, destinoAbsoluto)
+            if novoCaminho:
+                caminhoFoto = novoCaminho
+
+    galeria.append({"imagem": caminhoFoto, "anotacao": textoAnotacao})
+    console.print("\n[success]✅ Anotação salva com sucesso![/success]")
 
 # Percorre a lista da galeria e exibe todas as imagens e anotações salvas.
 def exibirAnotacoes():
@@ -277,14 +382,14 @@ def cadPalavraChave():
             if not palavrasChaves:
                 console.print("\n[warning]⚠️ Nenhuma palavra-chave cadastrada ainda.[/warning]")
             else:
-                painel_chaves = Panel(
+                painelChaves = Panel(
                     "\n".join([f"🔹 {p.capitalize()}" for p in palavrasChaves]),
                     title="[bold magenta]🔑 PALAVRAS-CHAVES CADASTRADAS[/bold magenta]",
                     expand=False,
                     border_style="cyan"
                 )
                 console.print("\n")
-                console.print(painel_chaves)
+                console.print(painelChaves)
 
         elif opcao == 3:
             if not palavrasChaves:
@@ -342,7 +447,7 @@ def cadPalavraChave():
                             "\n[warning]⚠️ A pasta para esta palavra-chave ainda não existe no disco (nenhuma imagem foi vinculada a ela ainda).[/warning]")
 
         elif opcao == 5:
-            info_painel = Panel(
+            infoPainel = Panel(
                 "Cadastre termos para organizar suas imagens de forma automática.\n"
                 "O sistema reconhece os termos nas suas anotações e separa os arquivos em suas respectivas pastas.",
                 title="💡 [bold yellow]MÓDULO DE PALAVRAS-CHAVE[/bold yellow]",
@@ -350,23 +455,9 @@ def cadPalavraChave():
                 expand=False
             )
             console.print("\n")
-            console.print(info_painel)
+            console.print(infoPainel)
         else:
             break
-
-
-#Criando uma despedida "melhor"
-def despedida_animada():
-    mensagens = ["Limpando cache...", "Organizando arquivos...", "SnapNote desligando..."]
-
-    with Live(console=console, refresh_per_second=4) as live:
-        for msg in mensagens:
-            live.update(Align.center(Panel(f"[bold magenta]{msg}[/bold magenta]", width=40)))
-            sleep(0.8)
-
-    # Limpa tudo e deixa uma mensagem final mais boa para a visão
-    limparTerminal()
-    console.print('\n[highlight]👋 Encerrando o SnapNote. Até logo![/highlight]\n')
 
 
 # Loop principal de execução do programa
@@ -374,15 +465,17 @@ while True:
     opcao = menuPrincipal()
 
     if opcao == 1:
-        adicionarAnotacao()
+        tirarFotoEAnotar()
     elif opcao == 2:
-        exibirAnotacoes()
+        adicionarAnotacao()
     elif opcao == 3:
-        buscarAnotacao()
+        exibirAnotacoes()
     elif opcao == 4:
-        cadPalavraChave()
+        buscarAnotacao()
     elif opcao == 5:
+        cadPalavraChave()
+    elif opcao == 6:
         limparTerminal()
-    elif opcao == 6 or opcao is None:
-        despedida_animada()
+    elif opcao == 7 or opcao is None:
+        console.print('\n[highlight]👋 Encerrando o SnapNote. Até logo![/highlight]\n')
         break
