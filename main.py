@@ -1,12 +1,10 @@
-import os
-import sys
-import subprocess
+#Olha só, não apaguei nada, então não reclame
+import os, sys, subprocess, shutil
 import tkinter as tk
 from tkinter import filedialog
 import questionary
 from questionary import Choice, Style
 import speech_recognition as sr
-import shutil
 import cv2
 from datetime import datetime
 
@@ -14,27 +12,34 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.theme import Theme
+#Estou adicionando para um uso interessante
+from rich.live import Live
+from time import sleep
+from rich.align import Align
+
 
 # Configuração do Tema e Console da Rich
+#Estou mudando as cores, quero opinião boa ein
 tema_customizado = Theme({
-    "info": "cyan",
-    "warning": "yellow",
-    "error": "bold red",
-    "success": "bold green",
+    "info": "italic grey70",
+    "warning": "bold gold1",
+    "error": "bold indian_red1",
+    "success": "bold spring_green3",
     "highlight": "bold magenta"
 })
 console = Console(theme=tema_customizado)
 
 # Estilização do Questionary
+#Mudei o qmark, answer, highlighted, selected, instruction
 estilo_menu = Style([
-    ('qmark', 'fg:#00ffff bold'),
+    ('qmark', 'fg:#87ceeb bold'),
     ('question', 'bold'),
-    ('answer', 'fg:#00ff00 bold'),
+    ('answer', 'fg:#00ff7f bold'),
     ('pointer', 'fg:#ff00ff bold'),
-    ('highlighted', 'fg:#00ffff bold'),
-    ('selected', 'fg:#00ff00'),
+    ('highlighted', 'fg:#87ceeb underline'),
+    ('selected', 'fg:#00ff7f'),
     ('separator', 'fg:#cc5454'),
-    ('instruction', 'fg:#858585 italic')
+    ('instruction', 'fg:#616161 italic')
 ])
 
 galeria = []
@@ -49,8 +54,32 @@ def garantirPastaFotos():
     os.makedirs(pastaFotos, exist_ok=True)
 
 
+#Adicionando um tipo de "banner"
+def exibir_banner():
+    banner = """
+    ┏━┓┏━┓┏━┓┏━┓┏┓╻┏━┓╺┳╸┏━╸
+    ┗━┓┃╻┃┣━┫┣━┛┃┗┫┃ ┃ ┃ ┣╸ 
+    ┗━┛╹┗╹╹ ╹╹  ╹ ╹┗━┛ ╹ ┗━╸
+    """
+
+    # Removi o Align.center e o padding lateral exagerado, que eu tinha feito e ninguém viu, só o Bruno mesmo
+    painel_banner = Panel(
+        banner,
+        subtitle="[bold]v1.0 - Sua Galeria Inteligente[/bold]",
+        border_style="magenta",
+        expand=False,  # Faz o painel se ajustar ao tamanho do texto, não à tela toda. Vai ficar nice demais
+        width=50,  # Estou forçando o painel ficar largo o suficiente, pois estava cortando o título ;-;
+        padding=(1, 5)  # Padding menor para não empurrar o texto, eu também mexi nisso anteriormente e não ficou legal
+    )
+
+    # Imprime direto, sem a função Align.center envolta, para quem não sabe eu também usei align
+    console.print(painel_banner)
+
+
 # Exibe o menu principal e retorna a opção escolhida pelo usuário.
 def menuPrincipal():
+    exibir_banner()
+
     painel = Panel.fit(
         "[bold cyan]Bem-vindo ao sistema de organização visual![/bold cyan]\n"
         "Selecione uma das opções abaixo para gerenciar sua galeria.",
@@ -184,32 +213,6 @@ def tirarFoto():
 
     return fotoCapturada
 
-# Grava o áudio do microfone, transcreve para texto usando o Google e retorna o resultado.
-def gravarAudio():
-    reconhecedor = sr.Recognizer()
-
-    with sr.Microphone() as source:
-        console.print("\n[info]🎤 Ajustando o ruído de fundo... aguarde um instante.[/info]")
-        reconhecedor.adjust_for_ambient_noise(source, duration=1)
-
-        console.print("[highlight]🔴 Pode falar! Estou ouvindo...[/highlight]")
-
-        try:
-            audio = reconhecedor.listen(source, timeout=5, phrase_time_limit=20)
-            console.print("[info]⏳ Processando o áudio...[/info]")
-            textoTranscrito = reconhecedor.recognize_google(audio, language='pt-BR')
-            return textoTranscrito
-
-        except sr.UnknownValueError:
-            console.print("[error]❌ Desculpe, o áudio ficou confuso e não foi possível entender.[/error]")
-            return None
-        except sr.RequestError:
-            console.print("[error]❌ Erro de conexão. Verifique sua internet.[/error]")
-            return None
-        except sr.WaitTimeoutError:
-            console.print("[error]❌ Você demorou muito para falar. Operação cancelada.[/error]")
-            return None
-
 
 # Tira foto ao vivo com a câmera e repassa o caminho para adicionarAnotacao.
 def tirarFotoEAnotar():
@@ -227,10 +230,39 @@ def tirarFotoEAnotar():
     adicionarAnotacao(caminhoFoto)
 
 
+# Grava o áudio do microfone, transcreve para texto usando o Google e retorna o resultado.
+def gravarAudio():
+    reconhecedor = sr.Recognizer()
+
+    with sr.Microphone() as source:
+        #Usei status para deixar mais "vivo"? Algo do tipo
+        with console.status("\n[info]🎤 Ajustando o ruído de fundo... aguarde um instante.[/info]", spinner="bouncingBall"):
+            reconhecedor.adjust_for_ambient_noise(source, duration=0.8)
+
+        console.print("[highlight]🔴 Pode falar! Estou ouvindo...[/highlight]")
+
+        try:
+            audio = reconhecedor.listen(source, timeout=5, phrase_time_limit=20)
+            #Também usei status
+            with console.status("[info]⏳ Processando o áudio...[/info]", spinner="arc"):
+                textoTranscrito = reconhecedor.recognize_google(audio, language='pt-BR')
+            return textoTranscrito
+
+        except sr.UnknownValueError:
+            console.print("[error]❌ Desculpe, o áudio ficou confuso e não foi possível entender.[/error]")
+            return None
+        except sr.RequestError:
+            console.print("[error]❌ Erro de conexão. Verifique sua internet.[/error]")
+            return None
+        except sr.WaitTimeoutError:
+            console.print("[error]❌ Você demorou muito para falar. Operação cancelada.[/error]")
+            return None
+
+
 # Abre o explorador para selecionar uma foto (se não receber caminho), recebe a anotação e salva na galeria.
 def adicionarAnotacao(caminhoFoto=None):
     if caminhoFoto is None:
-        console.print("\n[highlight]🖼️ Vamos adicionar uma nova anotação ao SnapNote![/highlight]")
+        console.print("\n[highlight]📸 Vamos adicionar uma nova anotação ao SnapNote![/highlight]")
 
         root = tk.Tk()
         root.withdraw()
@@ -274,6 +306,7 @@ def adicionarAnotacao(caminhoFoto=None):
 
     galeria.append({"imagem": caminhoFoto, "anotacao": textoAnotacao})
     console.print("\n[success]✅ Anotação salva com sucesso![/success]")
+
 
 # Percorre a lista da galeria e exibe todas as imagens e anotações salvas.
 def exibirAnotacoes():
@@ -382,14 +415,14 @@ def cadPalavraChave():
             if not palavrasChaves:
                 console.print("\n[warning]⚠️ Nenhuma palavra-chave cadastrada ainda.[/warning]")
             else:
-                painelChaves = Panel(
+                painel_chaves = Panel(
                     "\n".join([f"🔹 {p.capitalize()}" for p in palavrasChaves]),
                     title="[bold magenta]🔑 PALAVRAS-CHAVES CADASTRADAS[/bold magenta]",
                     expand=False,
                     border_style="cyan"
                 )
                 console.print("\n")
-                console.print(painelChaves)
+                console.print(painel_chaves)
 
         elif opcao == 3:
             if not palavrasChaves:
@@ -447,7 +480,7 @@ def cadPalavraChave():
                             "\n[warning]⚠️ A pasta para esta palavra-chave ainda não existe no disco (nenhuma imagem foi vinculada a ela ainda).[/warning]")
 
         elif opcao == 5:
-            infoPainel = Panel(
+            info_painel = Panel(
                 "Cadastre termos para organizar suas imagens de forma automática.\n"
                 "O sistema reconhece os termos nas suas anotações e separa os arquivos em suas respectivas pastas.",
                 title="💡 [bold yellow]MÓDULO DE PALAVRAS-CHAVE[/bold yellow]",
@@ -455,9 +488,23 @@ def cadPalavraChave():
                 expand=False
             )
             console.print("\n")
-            console.print(infoPainel)
+            console.print(info_painel)
         else:
             break
+
+
+#Criando uma despedida "melhor"
+def despedida_animada():
+    mensagens = ["Limpando cache...", "Organizando arquivos...", "SnapNote desligando..."]
+
+    with Live(console=console, refresh_per_second=4) as live:
+        for msg in mensagens:
+            live.update(Align.center(Panel(f"[bold magenta]{msg}[/bold magenta]", width=40)))
+            sleep(0.8)
+
+    # Limpa tudo e deixa uma mensagem final mais boa para a visão
+    limparTerminal()
+    console.print('\n[highlight]👋 Encerrando o SnapNote. Até logo![/highlight]\n')
 
 
 # Loop principal de execução do programa
@@ -477,5 +524,5 @@ while True:
     elif opcao == 6:
         limparTerminal()
     elif opcao == 7 or opcao is None:
-        console.print('\n[highlight]👋 Encerrando o SnapNote. Até logo![/highlight]\n')
+        despedida_animada()
         break
