@@ -508,21 +508,22 @@ def despedida_animada():
 
 
 # Loop principal de execução do programa
-while True:
-    opcao = menuPrincipal()
+if __name__ == "__main__":
+    while True:
+        opcao = menuPrincipal()
 
-    if opcao == 1:
-        tirarFotoEAnotar()
-    elif opcao == 2:
-        adicionarAnotacao()
-    elif opcao == 3:
-        exibirAnotacoes()
-    elif opcao == 4:
-        buscarAnotacao()
-    elif opcao == 5:
-        cadPalavraChave()
-    elif opcao == 6:
-        limparTerminal()
-    elif opcao == 7 or opcao is None:
-        despedida_animada()
-        break
+        if opcao == 1:
+            tirarFotoEAnotar()
+        elif opcao == 2:
+            adicionarAnotacao()
+        elif opcao == 3:
+            exibirAnotacoes()
+        elif opcao == 4:
+            buscarAnotacao()
+        elif opcao == 5:
+            cadPalavraChave()
+        elif opcao == 6:
+            limparTerminal()
+        elif opcao == 7 or opcao is None:
+            despedida_animada()
+            break
