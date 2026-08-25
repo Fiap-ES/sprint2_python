@@ -1,12 +1,15 @@
 import tkinter as tk
 from tkinter import messagebox, simpledialog
 import cv2
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageDraw
 import os
 import threading
 import shutil
 import json
+import math
 from datetime import datetime
+
+import theme
 
 try:
     import speech_recognition as sr
@@ -21,19 +24,29 @@ SURFACE2 = "#2C2C2E"
 TEXT     = "#F2F2F2"
 TEXT_DIM = "#8E8E93"
 BORDER   = "#3A3A3C"
-NAV_BG   = "#111111"
 DANGER   = "#FF453A"
 SUCCESS  = "#30D158"
+ICON_DIM = "#D6D6D6"
 
-FONT     = "Segoe UI"
-W, H, NAV_H = 390, 780, 65
-CONTENT_H    = H - NAV_H
+# GOLD e a família de fonte vêm de theme.py (fonte única de verdade).
+# FONT só ganha o valor definitivo dentro de SnapNoteApp.__init__, depois
+# que theme.resolve_fonts() roda (precisa de um root do Tk já existente).
+GOLD = theme.GOLD
+FONT = theme.FONT_FALLBACK
+W, H = 390, 780
+CONTENT_H = H
 
 
 # ── App principal ─────────────────────────────────────────────────────────────
 class SnapNoteApp:
     def __init__(self):
         self.root = tk.Tk()
+        # Precisa de um root já existente para consultar o banco de fontes
+        # do Tk, mas roda antes de qualquer widget de interface ser criado.
+        theme.resolve_fonts()
+        global FONT
+        FONT = theme.FONT_REGULAR
+
         self.root.title("SnapNote")
         self.root.configure(bg=BG)
         self.root.resizable(False, False)
@@ -58,9 +71,9 @@ class SnapNoteApp:
 
         # UI refs
         self._thumb_refs        = []
-        self._search_refs       = []
         self.current_screen: str | None = None
         self.gallery_folder     = "Todas"
+        self._gallery_search_open = False
         self._sheet_open        = False
         self._sheet_h           = 310
 
@@ -109,68 +122,12 @@ class SnapNoteApp:
         self.screens: dict[str, tk.Frame] = {}
         self._build_camera_screen()
         self._build_gallery_screen()
-        self._build_search_screen()
         self._build_annotation_sheet()
-        self._build_nav()
-
-    # ── Nav bar ───────────────────────────────────────────────────────────────
-    def _build_nav(self):
-        nav = tk.Frame(self.root, bg=NAV_BG, height=NAV_H)
-        nav.place(x=0, y=CONTENT_H, width=W, height=NAV_H)
-        tk.Frame(nav, bg=BORDER, height=1).pack(fill="x")
-
-        items = [
-            ("camera",  self._draw_icon_camera,  "Câmera"),
-            ("gallery", self._draw_icon_gallery, "Galeria"),
-            ("search",  self._draw_icon_search,  "Busca"),
-        ]
-        self._nav_icons  = {}
-        self._nav_labels = {}
-        btn_w = W // 3
-
-        for idx, (name, draw_fn, label) in enumerate(items):
-            frame = tk.Frame(nav, bg=NAV_BG, cursor="hand2")
-            frame.place(x=idx * btn_w, y=1, width=btn_w, height=NAV_H - 1)
-
-            cv = tk.Canvas(frame, width=26, height=26, bg=NAV_BG,
-                           highlightthickness=0, cursor="hand2")
-            cv.place(relx=0.5, rely=0.32, anchor="center")
-            draw_fn(cv, TEXT_DIM)
-
-            lbl = tk.Label(frame, text=label, font=(FONT, 7),
-                           bg=NAV_BG, fg=TEXT_DIM, cursor="hand2")
-            lbl.place(relx=0.5, rely=0.76, anchor="center")
-
-            for w in (frame, cv, lbl):
-                w.bind("<Button-1>", lambda e, n=name: self.show_screen(n))
-
-            self._nav_icons[name]  = (cv, draw_fn)
-            self._nav_labels[name] = lbl
-
-    def _draw_icon_camera(self, cv, color):
-        cv.delete("all")
-        cv.create_rectangle(2, 7, 24, 22, outline=color, width=1.5, fill="")
-        cv.create_oval(8, 10, 18, 19, outline=color, width=1.5, fill="")
-        cv.create_rectangle(9, 4, 15, 8, outline=color, width=1.5, fill="")
-
-    def _draw_icon_gallery(self, cv, color):
-        cv.delete("all")
-        for r in range(2):
-            for c in range(2):
-                x1, y1 = 3 + c * 12, 3 + r * 12
-                cv.create_rectangle(x1, y1, x1 + 9, y1 + 9,
-                                    outline=color, width=1.5, fill="")
 
     def _draw_icon_search(self, cv, color):
         cv.delete("all")
         cv.create_oval(3, 3, 16, 16, outline=color, width=1.5, fill="")
         cv.create_line(14, 14, 23, 23, fill=color, width=1.5)
-
-    def _update_nav(self, active: str):
-        for name, (cv, draw_fn) in self._nav_icons.items():
-            color = TEXT if name == active else TEXT_DIM
-            draw_fn(cv, color)
-            self._nav_labels[name].configure(fg=color)
 
     # ── Troca de tela ─────────────────────────────────────────────────────────
     def show_screen(self, name: str):
@@ -180,38 +137,108 @@ class SnapNoteApp:
             frame.place_forget()
         self.screens[name].place(x=0, y=0, width=W, height=CONTENT_H)
         self.current_screen = name
-        self._update_nav(name)
         if name == "camera":
             self._start_camera()
+            self._refresh_camera_thumb()
         elif name == "gallery":
             self._refresh_gallery()
-        elif name == "search":
-            self._render_search_results(self.galeria)
 
     # ── Tela de câmera ────────────────────────────────────────────────────────
     def _build_camera_screen(self):
         f = tk.Frame(self.container, bg="black")
         self.screens["camera"] = f
 
-        cam_h = CONTENT_H - 100
-        self.cam_canvas = tk.Canvas(f, bg="#0D0D0D", highlightthickness=0,
+        TOP_H, MODE_H, CTRL_H = 48, 40, 110
+
+        # ── Barra superior de ícones (altura fixa) ───────────────────────────
+        top = tk.Frame(f, bg="black", height=TOP_H)
+        top.pack(fill="x")
+        top.pack_propagate(False)
+
+        left_specs = [(self._draw_icon_scan, 0.07), (self._draw_icon_flash_off, 0.17),
+                      (self._draw_icon_motion_off, 0.27)]
+        for draw_fn, relx in left_specs:
+            cv = tk.Canvas(top, width=22, height=22, bg="black", highlightthickness=0)
+            cv.place(relx=relx, rely=0.5, anchor="center")
+            draw_fn(cv, ICON_DIM)
+
+        tk.Label(top, text=theme.letter_spaced("ZEISS"), font=theme.type_zeiss(),
+                 bg="black", fg=GOLD).place(relx=0.5, rely=0.5, anchor="center")
+
+        right_specs = [(self._draw_icon_video_off, 0.73), (self._draw_icon_settings, 0.83)]
+        for draw_fn, relx in right_specs:
+            cv = tk.Canvas(top, width=22, height=22, bg="black", highlightthickness=0)
+            cv.place(relx=relx, rely=0.5, anchor="center")
+            draw_fn(cv, ICON_DIM)
+
+        # ── Preview (ocupa todo o espaço restante) ───────────────────────────
+        # Empacotado por último (ver final do método): no packer do Tk, o
+        # widget com expand=True precisa ser processado depois de todo mundo
+        # que reserva espaço fixo, senão ele consome o espaço antes das
+        # linhas de baixo existirem e elas ficam com altura zero.
+        preview = tk.Frame(f, bg=SURFACE2)
+
+        self.cam_canvas = tk.Canvas(preview, bg=SURFACE2, highlightthickness=0,
                                     cursor="crosshair")
-        self.cam_canvas.place(x=0, y=0, width=W, height=cam_h)
-        self._cam_h = cam_h
-
-        # Placeholder enquanto câmera carrega
+        self.cam_canvas.pack(fill="both", expand=True)
         self.cam_canvas.create_text(
-            W // 2, cam_h // 2,
-            text="Inicializando câmera…",
-            fill="#2A2A2A", font=(FONT, 13), tags="placeholder",
+            0, 0, text="Inicializando câmera…",
+            fill=TEXT_DIM, font=(FONT, 13), tags="placeholder", anchor="center",
         )
+        self.cam_canvas.bind("<Configure>", self._on_cam_canvas_configure)
 
-        # Área de controles
-        ctrl = tk.Frame(f, bg="black", height=100)
-        ctrl.place(x=0, y=cam_h, width=W, height=100)
+        # Pill de zoom (overlay, ancorado ao centro/borda inferior do preview)
+        zoom_w, zoom_h = 132, 30
+        zoom_cv = tk.Canvas(preview, width=zoom_w, height=zoom_h, bg="#1C1C1C",
+                            highlightthickness=0)
+        zoom_cv.place(relx=0.5, rely=1.0, y=-16, anchor="s")
+        self._draw_zoom_selector(zoom_cv, zoom_w, zoom_h)
 
-        # Botão de captura
-        self.shutter = tk.Canvas(ctrl, width=72, height=72, bg="black",
+        # Botão circular extra (overlay, canto inferior direito do preview)
+        fx_size = 40
+        fx_cv = tk.Canvas(preview, width=fx_size, height=fx_size, bg="#1C1C1C",
+                          highlightthickness=0, cursor="hand2")
+        fx_cv.place(relx=1.0, rely=1.0, x=-16, y=-16, anchor="se")
+        self._draw_icon_fx(fx_cv, fx_size)
+
+        # ── Linha de modos (altura fixa, carrossel rolável) ──────────────────
+        # Empacotado com side="bottom" depois de "ctrl" (ver final do método)
+        # para reservar a fatia certa antes do preview absorver o resto.
+        mode_outer = tk.Frame(f, bg="black", height=MODE_H)
+        mode_outer.pack_propagate(False)
+
+        mode_canvas = tk.Canvas(mode_outer, bg="black", highlightthickness=0)
+        mode_canvas.pack(fill="both", expand=True)
+        mode_inner = tk.Frame(mode_canvas, bg="black")
+        mode_canvas.create_window(0, 0, anchor="nw", window=mode_inner)
+        mode_inner.bind("<Configure>",
+            lambda e: mode_canvas.configure(scrollregion=mode_canvas.bbox("all")))
+        mode_canvas.bind("<MouseWheel>",
+            lambda e: mode_canvas.xview_scroll(-1 * (e.delta // 120), "units"))
+
+        modes = [("Noite", False), ("Retrato", False), ("Foto", True),
+                 ("Vídeo", False), ("Microfilme", False), ("Câmera lenta", False)]
+        for idx, (label, active) in enumerate(modes):
+            color = GOLD if active else TEXT
+            tk.Label(mode_inner, text=label, font=theme.type_mode(active),
+                     bg="black", fg=color).pack(
+                         side="left", padx=(14 if idx == 0 else 0, 20))
+
+        # ── Linha de controles (altura fixa) ─────────────────────────────────
+        ctrl = tk.Frame(f, bg="black", height=CTRL_H)
+        ctrl.pack_propagate(False)
+
+        # Miniatura da galeria (canto inferior esquerdo)
+        thumb_size = 52
+        self.gallery_thumb_btn = tk.Label(ctrl, bg="black", cursor="hand2",
+                                          bd=0, highlightthickness=0)
+        self.gallery_thumb_btn.place(x=26, rely=0.5, anchor="w",
+                                     width=thumb_size, height=thumb_size)
+        self.gallery_thumb_btn.bind("<Button-1>", lambda e: self.show_screen("gallery"))
+        self._refresh_camera_thumb()
+
+        # Botão de captura (centro)
+        self.shutter = tk.Canvas(ctrl, width=76, height=76, bg="black",
                                  highlightthickness=0, cursor="hand2")
         self.shutter.place(relx=0.5, rely=0.5, anchor="center")
         self._draw_shutter()
@@ -219,11 +246,159 @@ class SnapNoteApp:
         self.shutter.bind("<Enter>",    lambda e: self._draw_shutter(hover=True))
         self.shutter.bind("<Leave>",    lambda e: self._draw_shutter(hover=False))
 
+        # Alternar câmera (canto inferior direito)
+        flip_cv = tk.Canvas(ctrl, width=44, height=44, bg="black",
+                            highlightthickness=0, cursor="hand2")
+        flip_cv.place(x=W - 26, rely=0.5, anchor="e")
+        self._draw_icon_flip(flip_cv, TEXT)
+
+        # Ordem de empacotamento importa no Tk: side="bottom" reserva as
+        # fatias fixas a partir de baixo, e o preview (fill+expand) é
+        # empacotado por último para absorver só o que sobrar no meio.
+        ctrl.pack(side="bottom", fill="x")
+        mode_outer.pack(side="bottom", fill="x")
+        preview.pack(fill="both", expand=True)
+
+    def _on_cam_canvas_configure(self, event):
+        self.cam_canvas.coords("placeholder", event.width / 2, event.height / 2)
+
     def _draw_shutter(self, hover=False):
         self.shutter.delete("all")
+        size, ring_w, gap = 72, 5, 6
         inner = "#CCCCCC" if hover else "#FFFFFF"
-        self.shutter.create_oval(4,  4,  68, 68, outline="#FFFFFF", width=2.5, fill="")
-        self.shutter.create_oval(11, 11, 61, 61, fill=inner, outline="")
+        self.shutter.create_oval(2, 2, size - 2, size - 2,
+                                 outline="#FFFFFF", width=ring_w)
+        inset = 2 + ring_w + gap
+        self.shutter.create_oval(inset, inset, size - inset, size - inset,
+                                 fill=inner, outline="")
+
+    # ── Ícones da barra superior / controles (desenhados em canvas) ─────────
+    @staticmethod
+    def _pill_points(x0, y0, x1, y1, r):
+        return [x0 + r, y0, x1 - r, y0, x1, y0, x1, y0 + r,
+                x1, y1 - r, x1, y1, x1 - r, y1, x0 + r, y1,
+                x0, y1, x0, y1 - r, x0, y0 + r, x0, y0]
+
+    def _draw_zoom_selector(self, cv, w, h):
+        cv.delete("all")
+        r = h / 2
+        cv.create_polygon(self._pill_points(0, 0, w, h, r),
+                          smooth=True, fill="#1C1C1C", outline="")
+        labels = ["0.6", "1x", "2"]
+        seg = w / 3
+        for i, label in enumerate(labels):
+            cx = seg * i + seg / 2
+            if label == "1x":
+                cv.create_oval(cx - h/2 + 3, 3, cx + h/2 - 3, h - 3,
+                               fill=GOLD, outline="")
+                cv.create_text(cx, h / 2, text=label,
+                               fill="black", font=theme.type_zoom(True))
+            else:
+                cv.create_text(cx, h / 2, text=label,
+                               fill=TEXT, font=theme.type_zoom(False))
+
+    def _draw_icon_scan(self, cv, color):
+        cv.delete("all")
+        L = 6
+        corners = [(2, 2), (22, 2), (2, 22), (22, 22)]
+        for x, y in corners:
+            cv.create_line(x, y, x + L * (1 if x < 12 else -1), y, fill=color, width=1.6)
+            cv.create_line(x, y, x, y + L * (1 if y < 12 else -1), fill=color, width=1.6)
+        cv.create_oval(9, 9, 15, 15, outline=color, width=1.4)
+
+    def _draw_icon_flash_off(self, cv, color):
+        cv.delete("all")
+        cv.create_line(13, 2, 6, 14, fill=color, width=1.4)
+        cv.create_line(6, 14, 12, 14, fill=color, width=1.4)
+        cv.create_line(12, 14, 9, 23, fill=color, width=1.4)
+        cv.create_line(9, 23, 19, 11, fill=color, width=1.4)
+        cv.create_line(19, 11, 13, 11, fill=color, width=1.4)
+        cv.create_line(13, 11, 13, 2, fill=color, width=1.4)
+        cv.create_line(2, 2, 23, 23, fill=color, width=1.4)
+
+    def _draw_icon_motion_off(self, cv, color):
+        cv.delete("all")
+        cv.create_oval(3, 3, 21, 21, outline=color, width=1.4)
+        cv.create_oval(9, 9, 15, 15, outline=color, width=1.4)
+        cv.create_line(3, 21, 21, 3, fill=color, width=1.4)
+
+    def _draw_icon_video_off(self, cv, color):
+        cv.delete("all")
+        cv.create_rectangle(2, 7, 16, 18, outline=color, width=1.4)
+        cv.create_polygon(16, 10, 22, 6, 22, 19, 16, 15, fill="", outline=color, width=1.4)
+        cv.create_line(2, 2, 22, 22, fill=color, width=1.4)
+
+    def _draw_icon_settings(self, cv, color):
+        cv.delete("all")
+        cx, cy, r_out, r_in, n = 11, 11, 8, 5, 8
+        pts = []
+        for i in range(n * 2):
+            ang = math.radians(i * (360 / (n * 2)))
+            rad = r_out if i % 2 == 0 else r_out - 2.4
+            pts.extend((cx + rad * math.cos(ang), cy + rad * math.sin(ang)))
+        cv.create_polygon(pts, outline=color, fill="", width=1.3)
+        cv.create_oval(cx - r_in, cy - r_in, cx + r_in, cy + r_in, outline=color, width=1.3)
+
+    def _draw_icon_flip(self, cv, color):
+        cv.delete("all")
+        size = 44
+        cv.create_oval(2, 2, size - 2, size - 2, fill="#2C2C2E", outline="")
+        cv.create_arc(7, 7, 37, 37, start=25, extent=130,
+                     style="arc", outline=color, width=2.2)
+        cv.create_arc(7, 7, 37, 37, start=205, extent=130,
+                     style="arc", outline=color, width=2.2)
+        cv.create_polygon(32, 9, 37, 11, 33, 17, fill=color, outline="")
+        cv.create_polygon(12, 35, 7, 33, 11, 28, fill=color, outline="")
+
+    def _draw_icon_fx(self, cv, size):
+        cv.delete("all")
+        cv.create_oval(2, 2, size - 2, size - 2, fill="#1C1C1C", outline="")
+        s = size / 40
+        def pt(x, y):
+            return (x - 12) * s + size / 2, (y - 12) * s + size / 2
+        path = [(13, 2), (6, 14), (12, 14), (9, 23), (19, 11), (13, 11), (13, 2)]
+        for (x0, y0), (x1, y1) in zip(path, path[1:]):
+            cv.create_line(*pt(x0, y0), *pt(x1, y1), fill=TEXT, width=1.6)
+        cv.create_line(*pt(2, 2), *pt(23, 23), fill=TEXT, width=1.6)
+
+    def _rounded_photo(self, img: Image.Image, size: int, radius: int = 10):
+        img = img.convert("RGBA").resize((size, size), Image.LANCZOS)
+        mask = Image.new("L", (size, size), 0)
+        ImageDraw.Draw(mask).rounded_rectangle((0, 0, size, size), radius=radius, fill=255)
+        img.putalpha(mask)
+        return ImageTk.PhotoImage(img)
+
+    def _refresh_camera_thumb(self):
+        if not hasattr(self, "gallery_thumb_btn"):
+            return
+        latest = self.captured_path if self.captured_path and os.path.exists(self.captured_path) else None
+        if not latest:
+            for item in reversed(self.galeria):
+                if os.path.exists(item["imagem"]):
+                    latest = item["imagem"]
+                    break
+        if not latest and os.path.isdir(self.pastaFotos):
+            files = [os.path.join(self.pastaFotos, n) for n in os.listdir(self.pastaFotos)
+                     if n.lower().endswith((".jpg", ".jpeg", ".png"))]
+            if files:
+                latest = max(files, key=os.path.getmtime)
+        size = 52
+        if latest:
+            try:
+                img = Image.open(latest)
+                ew, eh = img.size
+                m = min(ew, eh)
+                img = img.crop(((ew - m) // 2, (eh - m) // 2,
+                                (ew + m) // 2, (eh + m) // 2))
+                ref = self._rounded_photo(img, size, radius=8)
+                self.gallery_thumb_btn.configure(image=ref, bg="black")
+                self.gallery_thumb_btn._ref = ref
+                return
+            except Exception:
+                pass
+        ref = self._rounded_photo(Image.new("RGB", (size, size), SURFACE2), size, radius=8)
+        self.gallery_thumb_btn.configure(image=ref, bg="black")
+        self.gallery_thumb_btn._ref = ref
 
     # ── Câmera: captura de frame ──────────────────────────────────────────────
     def _start_camera(self):
@@ -264,7 +439,9 @@ class SnapNoteApp:
     def _draw_cam_frame(self):
         if self.last_frame is None:
             return
-        cw, ch = W, self._cam_h
+        cw, ch = self.cam_canvas.winfo_width(), self.cam_canvas.winfo_height()
+        if cw < 2 or ch < 2:
+            return
         fh, fw = self.last_frame.shape[:2]
         scale  = max(cw / fw, ch / fh)
         nw, nh = int(fw * scale), int(fh * scale)
@@ -288,6 +465,7 @@ class SnapNoteApp:
         self.captured_path = path
         self._flash()
         self._show_annotation_sheet()
+        self._refresh_camera_thumb()
 
     def _flash(self):
         flash = tk.Frame(self.screens["camera"], bg="white")
@@ -407,6 +585,7 @@ class SnapNoteApp:
             self._save_data()
         self.captured_path = None
         self._hide_annotation_sheet()
+        self._refresh_camera_thumb()
 
     def _discard(self):
         if self.captured_path and os.path.exists(self.captured_path):
@@ -416,6 +595,7 @@ class SnapNoteApp:
                 pass
         self.captured_path = None
         self._hide_annotation_sheet()
+        self._refresh_camera_thumb()
 
     def _record_audio(self):
         if not AUDIO_AVAILABLE:
@@ -448,19 +628,55 @@ class SnapNoteApp:
         header.pack(fill="x")
         header.pack_propagate(False)
 
+        back_lbl = tk.Label(header, text="←", font=(FONT, 16),
+                            bg=BG, fg=TEXT, cursor="hand2", padx=12)
+        back_lbl.place(x=4, rely=0.5, anchor="w")
+        back_lbl.bind("<Button-1>", lambda e: self.show_screen("camera"))
+
         tk.Label(header, text="Galeria", font=(FONT, 18, "bold"),
-                 bg=BG, fg=TEXT).place(x=20, rely=0.5, anchor="w")
+                 bg=BG, fg=TEXT).place(x=44, rely=0.5, anchor="w")
 
         menu_lbl = tk.Label(header, text="⋮", font=(FONT, 21),
                             bg=BG, fg=TEXT, cursor="hand2", padx=12, pady=4)
         menu_lbl.place(relx=1.0, x=-4, rely=0.5, anchor="e")
         menu_lbl.bind("<Button-1>", self._show_gallery_menu)
 
+        search_toggle = tk.Canvas(header, width=26, height=26, bg=BG,
+                                  highlightthickness=0, cursor="hand2")
+        search_toggle.place(relx=1.0, x=-40, rely=0.5, anchor="e")
+        self._draw_icon_search(search_toggle, TEXT)
+        search_toggle.bind("<Button-1>", lambda e: self._toggle_gallery_search())
+
         # Separador
         tk.Frame(f, bg=BORDER, height=1).pack(fill="x")
 
+        # Barra de busca (oculta por padrão)
+        self._gallery_search_wrap = tk.Frame(f, bg=BG, pady=10)
+
+        input_bg = tk.Frame(self._gallery_search_wrap, bg=SURFACE2,
+                            highlightbackground=BORDER, highlightthickness=1)
+        input_bg.pack(fill="x", padx=16, ipady=2)
+
+        icon_cv = tk.Canvas(input_bg, width=20, height=20, bg=SURFACE2,
+                            highlightthickness=0)
+        icon_cv.pack(side="left", padx=(10, 0))
+        icon_cv.create_oval(3, 3, 14, 14, outline=TEXT_DIM, width=1.5)
+        icon_cv.create_line(13, 13, 18, 18, fill=TEXT_DIM, width=1.5)
+
+        self.gal_search_entry = tk.Entry(
+            input_bg, font=(FONT, 11), bg=SURFACE2, fg=TEXT,
+            insertbackground=TEXT, relief="flat", bd=8,
+        )
+        self.gal_search_entry.pack(side="left", fill="x", expand=True)
+        self.gal_search_entry.bind("<KeyRelease>", lambda e: self._render_grid())
+
+        close_lbl = tk.Label(input_bg, text="✕", font=(FONT, 11),
+                             bg=SURFACE2, fg=TEXT_DIM, cursor="hand2", padx=8)
+        close_lbl.pack(side="right")
+        close_lbl.bind("<Button-1>", lambda e: self._toggle_gallery_search(force_close=True))
+
         # Tabs de pastas
-        tabs_outer = tk.Frame(f, bg=BG, height=44)
+        self._gallery_tabs_outer = tabs_outer = tk.Frame(f, bg=BG, height=44)
         tabs_outer.pack(fill="x")
         tabs_outer.pack_propagate(False)
 
@@ -503,6 +719,17 @@ class SnapNoteApp:
         self._update_tabs()
         self._render_grid()
 
+    def _toggle_gallery_search(self, force_close: bool = False):
+        if self._gallery_search_open or force_close:
+            self._gallery_search_wrap.pack_forget()
+            self._gallery_search_open = False
+            self.gal_search_entry.delete(0, "end")
+        else:
+            self._gallery_search_wrap.pack(fill="x", before=self._gallery_tabs_outer)
+            self._gallery_search_open = True
+            self.gal_search_entry.focus_set()
+        self._render_grid()
+
     def _update_tabs(self):
         for w in self._tabs_inner.winfo_children():
             w.destroy()
@@ -531,8 +758,13 @@ class SnapNoteApp:
         self._thumb_refs = []
 
         images = self._get_folder_images()
+        query = self.gal_search_entry.get().strip().lower() if self._gallery_search_open else ""
+        if query:
+            images = [i for i in images if query in i.get("anotacao", "").lower()]
+
         if not images:
-            tk.Label(self.gal_inner, text="Nenhuma foto ainda",
+            msg = "Nenhum resultado" if query else "Nenhuma foto ainda"
+            tk.Label(self.gal_inner, text=msg,
                      font=(FONT, 12), bg=BG, fg=TEXT_DIM,
                      pady=60).pack()
             return
@@ -766,134 +998,6 @@ class SnapNoteApp:
         self._save_data()
         self._refresh_gallery()
 
-    # ── Tela de busca ─────────────────────────────────────────────────────────
-    def _build_search_screen(self):
-        f = tk.Frame(self.container, bg=BG)
-        self.screens["search"] = f
-
-        # Barra de busca
-        search_wrap = tk.Frame(f, bg=BG, pady=14)
-        search_wrap.pack(fill="x", padx=16)
-
-        input_bg = tk.Frame(search_wrap, bg=SURFACE2,
-                            highlightbackground=BORDER, highlightthickness=1)
-        input_bg.pack(fill="x", ipady=2)
-
-        icon_cv = tk.Canvas(input_bg, width=20, height=20, bg=SURFACE2,
-                            highlightthickness=0)
-        icon_cv.pack(side="left", padx=(10, 0))
-        icon_cv.create_oval(3, 3, 14, 14, outline=TEXT_DIM, width=1.5)
-        icon_cv.create_line(13, 13, 18, 18, fill=TEXT_DIM, width=1.5)
-
-        self.search_entry = tk.Entry(
-            input_bg, font=(FONT, 12), bg=SURFACE2, fg=TEXT_DIM,
-            insertbackground=TEXT, relief="flat", bd=8,
-        )
-        self.search_entry.pack(side="left", fill="x", expand=True)
-        self.search_entry.insert(0, "Buscar anotações…")
-        self.search_entry.bind("<FocusIn>",  self._search_focus_in)
-        self.search_entry.bind("<FocusOut>", self._search_focus_out)
-        self.search_entry.bind("<KeyRelease>", self._do_search)
-
-        # Resultados
-        res_wrap = tk.Frame(f, bg=BG)
-        res_wrap.pack(fill="both", expand=True)
-
-        self.res_canvas = tk.Canvas(res_wrap, bg=BG,
-                                    highlightthickness=0, bd=0)
-        res_scroll      = tk.Scrollbar(res_wrap, orient="vertical",
-                                       command=self.res_canvas.yview)
-        self.res_canvas.configure(yscrollcommand=res_scroll.set)
-        self.res_canvas.pack(side="left", fill="both", expand=True)
-        res_scroll.pack(side="right", fill="y")
-
-        self.res_inner = tk.Frame(self.res_canvas, bg=BG)
-        self._res_win  = self.res_canvas.create_window(
-            0, 0, anchor="nw", window=self.res_inner)
-        self.res_inner.bind("<Configure>",
-            lambda e: self.res_canvas.configure(
-                scrollregion=self.res_canvas.bbox("all")))
-        self.res_canvas.bind("<MouseWheel>",
-            lambda e: self.res_canvas.yview_scroll(
-                -1 * (e.delta // 120), "units"))
-
-        self._search_refs: list = []
-
-    def _search_focus_in(self, _):
-        if self.search_entry.get() == "Buscar anotações…":
-            self.search_entry.delete(0, "end")
-            self.search_entry.configure(fg=TEXT)
-
-    def _search_focus_out(self, _):
-        if not self.search_entry.get():
-            self.search_entry.insert(0, "Buscar anotações…")
-            self.search_entry.configure(fg=TEXT_DIM)
-
-    def _do_search(self, _=None):
-        query = self.search_entry.get().strip().lower()
-        if not query or query == "buscar anotações…":
-            self._render_search_results(self.galeria)
-        else:
-            hits = [i for i in self.galeria
-                    if query in i.get("anotacao", "").lower()]
-            self._render_search_results(hits)
-
-    def _render_search_results(self, items: list[dict]):
-        for w in self.res_inner.winfo_children():
-            w.destroy()
-        self._search_refs = []
-        self.res_canvas.itemconfig(self._res_win, width=W - 15)
-
-        valid = [i for i in items if os.path.exists(i["imagem"])]
-        if not valid:
-            tk.Label(self.res_inner, text="Nenhum resultado",
-                     font=(FONT, 12), bg=BG, fg=TEXT_DIM,
-                     pady=40).pack()
-            return
-
-        for item in valid:
-            row = tk.Frame(self.res_inner, bg=SURFACE, cursor="hand2")
-            row.pack(fill="x", padx=12, pady=(0, 2))
-
-            thumb = tk.Label(row, bg=SURFACE2)
-            thumb.pack(side="left", padx=8, pady=8)
-            self._load_thumb_small(item["imagem"], thumb)
-
-            txt = tk.Frame(row, bg=SURFACE)
-            txt.pack(side="left", fill="both", expand=True, padx=10, pady=10)
-
-            annot = item.get("anotacao", "") or "Sem anotação"
-            tk.Label(txt, text=annot[:70], font=(FONT, 10),
-                     bg=SURFACE, fg=TEXT, anchor="w",
-                     wraplength=240, justify="left").pack(anchor="w")
-            tk.Label(txt, text=os.path.basename(item["imagem"]),
-                     font=(FONT, 8), bg=SURFACE,
-                     fg=TEXT_DIM, anchor="w").pack(anchor="w", pady=(2, 0))
-
-            path = item["imagem"]
-            annot_full = item.get("anotacao", "")
-            for widget in row.winfo_children() + [row]:
-                widget.bind("<Button-1>",
-                    lambda e, p=path, a=annot_full: self._open_detail(p, a))
-
-            row.bind("<Enter>", lambda e, r=row: r.configure(bg=SURFACE2))
-            row.bind("<Leave>", lambda e, r=row: r.configure(bg=SURFACE))
-
-    def _load_thumb_small(self, path: str, label: tk.Label, size: int = 56):
-        try:
-            img = Image.open(path)
-            ew, eh = img.size
-            m   = min(ew, eh)
-            img = img.crop(((ew - m) // 2, (eh - m) // 2,
-                            (ew + m) // 2, (eh + m) // 2))
-            img = img.resize((size, size), Image.LANCZOS)
-            ref = ImageTk.PhotoImage(img)
-            self._search_refs.append(ref)
-            label.configure(image=ref, width=size, height=size)
-        except Exception:
-            label.configure(text="?", fg=TEXT_DIM, font=(FONT, 16),
-                            width=4, height=2)
-
     # ── Encerramento ──────────────────────────────────────────────────────────
     def _on_close(self):
         self._stop_camera()
@@ -905,5 +1009,6 @@ class SnapNoteApp:
 
 
 if __name__ == "__main__":
+    theme.register_fonts()
     app = SnapNoteApp()
     app.run()
