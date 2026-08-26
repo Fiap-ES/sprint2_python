@@ -74,8 +74,12 @@ class SnapNoteApp:
         self.current_screen: str | None = None
         self.gallery_folder     = "Todas"
         self._gallery_search_open = False
-        self._sheet_open        = False
-        self._sheet_h           = 310
+        self._popup_open         = False
+        self._popup_text_visible = False
+        self._mic_recording      = False
+        self._popup_pill_w       = 248
+        self._popup_pill_h       = 56
+        self._popup_rely         = 0.82
 
         self._load_data()
         self._build_ui()
@@ -122,7 +126,7 @@ class SnapNoteApp:
         self.screens: dict[str, tk.Frame] = {}
         self._build_camera_screen()
         self._build_gallery_screen()
-        self._build_annotation_sheet()
+        self._build_annotation_popup()
 
     def _draw_icon_search(self, cv, color):
         cv.delete("all")
@@ -464,7 +468,7 @@ class SnapNoteApp:
         cv2.imwrite(path, frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
         self.captured_path = path
         self._flash()
-        self._show_annotation_sheet()
+        self._show_annotation_popup()
         self._refresh_camera_thumb()
 
     def _flash(self):
@@ -473,104 +477,179 @@ class SnapNoteApp:
         self.root.update()
         self.root.after(110, flash.destroy)
 
-    # ── Annotation sheet (slide-up) ───────────────────────────────────────────
-    def _build_annotation_sheet(self):
-        sh = self._sheet_h
-        self.sheet = tk.Frame(self.root, bg=SURFACE, bd=0)
-        self.sheet.place(x=0, y=H, width=W, height=sh)
+    # ── Annotation popup (modal flutuante) ────────────────────────────────────
+    def _build_annotation_popup(self):
+        # Fundo escurecido (usa a própria foto capturada, com brilho reduzido)
+        self.popup_backdrop = tk.Canvas(self.root, bg=BG, highlightthickness=0)
+        self.popup_backdrop.bind("<Button-1>",
+            lambda e: self._save_annotation_with_text(self.annot_entry.get().strip()))
 
-        # Handle
-        tk.Frame(self.sheet, bg=BORDER, width=36, height=4).place(relx=0.5, y=10, anchor="n")
+        # Pill com os 5 ícones (recorte, lápis, hashtag, compartilhar, mic)
+        self.popup_pill = tk.Canvas(self.root, width=self._popup_pill_w,
+                                    height=self._popup_pill_h, bg=BG,
+                                    highlightthickness=0)
+        self._draw_popup_pill()
 
-        # Título
-        tk.Label(self.sheet, text="Nova anotação", font=(FONT, 13, "bold"),
-                 bg=SURFACE, fg=TEXT).place(x=20, y=30)
+        for idx, handler in ((1, self._toggle_popup_text), (4, self._record_audio)):
+            tag = f"hit_{idx}"
+            self.popup_pill.tag_bind(tag, "<Button-1>", lambda e, h=handler: h())
+            self.popup_pill.tag_bind(tag, "<Enter>",
+                lambda e: self.popup_pill.configure(cursor="hand2"))
+            self.popup_pill.tag_bind(tag, "<Leave>",
+                lambda e: self.popup_pill.configure(cursor=""))
 
-        # Miniatura
-        self.sheet_thumb = tk.Label(self.sheet, bg=SURFACE2)
-        self.sheet_thumb.place(x=20, y=62, width=64, height=48)
-
-        # Campo de texto
-        entry_bg = tk.Frame(self.sheet, bg=SURFACE2,
-                            highlightbackground=BORDER, highlightthickness=1)
-        entry_bg.place(x=96, y=62, width=W - 116, height=48)
+        # Bloco de texto (revelado ao tocar no lápis)
+        self.popup_text_frame = tk.Frame(self.root, bg=SURFACE2,
+                                         highlightbackground=BORDER,
+                                         highlightthickness=1)
 
         self.annot_entry = tk.Entry(
-            entry_bg, font=(FONT, 11), bg=SURFACE2, fg=TEXT,
-            insertbackground=TEXT, relief="flat", bd=8,
+            self.popup_text_frame, font=(FONT, 12), bg=SURFACE2, fg=TEXT,
+            insertbackground=TEXT, relief="flat", bd=0,
         )
-        self.annot_entry.pack(side="left", fill="both", expand=True)
+        self.annot_entry.place(x=12, y=8, width=self._popup_pill_w - 12 - 46, height=32)
+        self.annot_entry.bind("<Return>", lambda e: self._confirm_popup_text())
 
-        if AUDIO_AVAILABLE:
-            self._mic_btn = tk.Label(entry_bg, text="🎤", font=(FONT, 15),
-                                     bg=SURFACE2, fg=TEXT_DIM, cursor="hand2", padx=6)
-            self._mic_btn.pack(side="right", pady=4)
-            self._mic_btn.bind("<Button-1>", lambda e: self._record_audio())
+        self.popup_confirm_cv = tk.Canvas(self.popup_text_frame, width=34, height=34,
+                                          bg=SURFACE2, highlightthickness=0,
+                                          cursor="hand2")
+        self.popup_confirm_cv.place(relx=1.0, x=-10, rely=0.5, anchor="e")
+        self._draw_confirm_check(self.popup_confirm_cv)
+        self.popup_confirm_cv.bind("<Button-1>", lambda e: self._confirm_popup_text())
 
-        # Botões
-        cancel = tk.Label(self.sheet, text="Descartar", font=(FONT, 11),
-                          bg=SURFACE2, fg=TEXT_DIM, cursor="hand2",
-                          pady=10, anchor="center")
-        cancel.place(x=20, y=128, width=165, height=38)
-        cancel.bind("<Button-1>", lambda e: self._discard())
+    def _draw_popup_backdrop(self):
+        cv = self.popup_backdrop
+        cv.delete("all")
+        src = None
+        if self.last_frame is not None:
+            rgb = cv2.cvtColor(self.last_frame, cv2.COLOR_BGR2RGB)
+            src = Image.fromarray(rgb)
+        elif self.captured_path and os.path.exists(self.captured_path):
+            src = Image.open(self.captured_path)
+        if src is not None:
+            fw, fh = src.size
+            scale  = max(W / fw, H / fh)
+            nw, nh = int(fw * scale), int(fh * scale)
+            img    = src.resize((nw, nh), Image.BILINEAR)
+            x0, y0 = (nw - W) // 2, (nh - H) // 2
+            img    = img.crop((x0, y0, x0 + W, y0 + H)).convert("RGB")
+            img    = img.point(lambda p: int(p * 0.35))
+            self._popup_bg_ref = ImageTk.PhotoImage(img)
+            cv.create_image(0, 0, image=self._popup_bg_ref, anchor="nw")
+        else:
+            cv.create_rectangle(0, 0, W, H, fill=BG, outline="")
 
-        save = tk.Label(self.sheet, text="Salvar", font=(FONT, 11, "bold"),
-                        bg=TEXT, fg="black", cursor="hand2",
-                        pady=10, anchor="center")
-        save.place(x=195, y=128, width=175, height=38)
-        save.bind("<Button-1>", lambda e: self._save_annotation())
+    def _draw_popup_pill(self):
+        cv = self.popup_pill
+        cv.delete("all")
+        w, h = self._popup_pill_w, self._popup_pill_h
+        r = h / 2
+        cv.create_polygon(self._pill_points(0, 0, w, h, r),
+                          smooth=True, fill=SURFACE2, outline="")
 
-        # Hover effects
-        for btn, normal_bg, hover_bg in [
-            (cancel, SURFACE2, "#3A3A3C"),
-            (save,   TEXT,     "#DDDDDD"),
-        ]:
-            btn.bind("<Enter>", lambda e, b=btn, c=hover_bg: b.configure(bg=c))
-            btn.bind("<Leave>", lambda e, b=btn, c=normal_bg: b.configure(bg=c))
+        slots = w / 5
+        y = h / 2
+        for i in range(5):
+            cx = slots * i + slots / 2
+            cv.create_rectangle(cx - slots / 2, 0, cx + slots / 2, h,
+                                fill="", outline="", tags=(f"hit_{i}",))
 
-    def _show_annotation_sheet(self):
-        if self._sheet_open:
+        self._draw_popup_icon_crop(slots * 0 + slots / 2, y)
+        self._draw_popup_icon_pencil(slots * 1 + slots / 2, y)
+        self._draw_popup_icon_hashtag(slots * 2 + slots / 2, y)
+        self._draw_popup_icon_share(slots * 3 + slots / 2, y)
+        mic_color = DANGER if self._mic_recording else ICON_DIM
+        self._draw_popup_icon_mic(slots * 4 + slots / 2, y, mic_color)
+
+    def _draw_popup_icon_crop(self, cx, cy):
+        cv, c = self.popup_pill, ICON_DIM
+        cv.create_line(cx - 5, cy - 9, cx - 5, cy + 6, fill=c, width=1.6)
+        cv.create_line(cx - 9, cy - 5, cx + 6, cy - 5, fill=c, width=1.6)
+        cv.create_line(cx + 5, cy - 6, cx + 5, cy + 9, fill=c, width=1.6)
+        cv.create_line(cx - 6, cy + 5, cx + 9, cy + 5, fill=c, width=1.6)
+
+    def _draw_popup_icon_pencil(self, cx, cy):
+        cv, c = self.popup_pill, ICON_DIM
+        ox, oy = cx - 12, cy - 12
+        pts = [(15, 5), (19, 9), (9, 19), (5, 19), (5, 15)]
+        flat = [coord for x, y in pts for coord in (ox + x, oy + y)]
+        cv.create_polygon(flat, fill=c, outline="")
+
+    def _draw_popup_icon_hashtag(self, cx, cy):
+        cv, c = self.popup_pill, ICON_DIM
+        cv.create_line(cx - 3, cy - 8, cx - 3, cy + 8, fill=c, width=1.6)
+        cv.create_line(cx + 3, cy - 8, cx + 3, cy + 8, fill=c, width=1.6)
+        cv.create_line(cx - 8, cy - 3, cx + 8, cy - 3, fill=c, width=1.6)
+        cv.create_line(cx - 8, cy + 3, cx + 8, cy + 3, fill=c, width=1.6)
+
+    def _draw_popup_icon_share(self, cx, cy):
+        cv, c = self.popup_pill, ICON_DIM
+        cv.create_oval(cx + 2, cy - 9, cx + 8, cy - 3, outline=c, width=1.4)
+        cv.create_oval(cx + 2, cy + 3, cx + 8, cy + 9, outline=c, width=1.4)
+        cv.create_oval(cx - 9, cy - 3, cx - 3, cy + 3, outline=c, width=1.4)
+        cv.create_line(cx - 4, cy - 2, cx + 3, cy - 6, fill=c, width=1.3)
+        cv.create_line(cx - 4, cy + 2, cx + 3, cy + 6, fill=c, width=1.3)
+
+    def _draw_popup_icon_mic(self, cx, cy, color):
+        cv = self.popup_pill
+        bw, bh = 8, 13
+        x0, y0 = cx - bw / 2, cy - 9
+        x1, y1 = cx + bw / 2, y0 + bh
+        cv.create_polygon(self._pill_points(x0, y0, x1, y1, bw / 2),
+                          smooth=True, fill=color, outline="")
+        cv.create_arc(cx - 8, cy - 3, cx + 8, cy + 9, start=200, extent=140,
+                      style="arc", outline=color, width=1.5)
+        cv.create_line(cx, cy + 7, cx, cy + 10, fill=color, width=1.5,
+                       capstyle="round")
+        cv.create_line(cx - 4, cy + 10, cx + 4, cy + 10, fill=color, width=1.5,
+                       capstyle="round")
+
+    def _draw_confirm_check(self, cv):
+        cv.delete("all")
+        cv.create_oval(2, 2, 32, 32, fill=GOLD, outline="")
+        cv.create_line(10, 17, 14, 22, fill="black", width=2.4, capstyle="round")
+        cv.create_line(14, 22, 24, 10, fill="black", width=2.4, capstyle="round")
+
+    def _show_annotation_popup(self):
+        if self._popup_open:
             return
-        self._sheet_open = True
-        self.cam_paused = True
-        self._refresh_sheet_thumb()
+        self._popup_open = True
+        self.cam_paused  = True
+        self._popup_text_visible = False
+        self._mic_recording      = False
         self.annot_entry.delete(0, "end")
-        self._anim_sheet(H, H - self._sheet_h, 0)
+        self.popup_text_frame.place_forget()
 
-    def _hide_annotation_sheet(self):
-        self._anim_sheet(H - self._sheet_h, H, 0,
-                         on_done=self._after_sheet_close)
+        self._draw_popup_backdrop()
+        self._draw_popup_pill()
 
-    def _after_sheet_close(self):
-        self._sheet_open = False
+        self.popup_backdrop.place(x=0, y=0, width=W, height=H)
+        self.popup_pill.place(relx=0.5, rely=self._popup_rely, anchor="center")
+        self.popup_backdrop.lift()
+        self.popup_pill.lift()
+
+    def _hide_annotation_popup(self):
+        self.popup_pill.place_forget()
+        self.popup_text_frame.place_forget()
+        self.popup_backdrop.place_forget()
+        self._popup_open = False
         self.cam_paused  = False
 
-    def _anim_sheet(self, y0, y1, step, on_done=None):
-        steps = 14
-        y     = y0 + (y1 - y0) * step / steps
-        self.sheet.place(x=0, y=int(y), width=W, height=self._sheet_h)
-        self.sheet.lift()
-        if step < steps:
-            self.root.after(14, lambda: self._anim_sheet(y0, y1, step + 1, on_done))
-        else:
-            self.sheet.place(x=0, y=y1, width=W, height=self._sheet_h)
-            if on_done:
-                on_done()
-
-    def _refresh_sheet_thumb(self):
-        if not self.captured_path or not os.path.exists(self.captured_path):
+    def _toggle_popup_text(self):
+        if self._popup_text_visible:
+            self.annot_entry.focus_set()
             return
-        try:
-            img = Image.open(self.captured_path)
-            img.thumbnail((128, 96))
-            ref = ImageTk.PhotoImage(img)
-            self.sheet_thumb.configure(image=ref)
-            self.sheet_thumb._ref = ref
-        except Exception:
-            pass
+        self._popup_text_visible = True
+        pill_top = int(H * self._popup_rely) - self._popup_pill_h // 2
+        self.popup_text_frame.place(relx=0.5, y=pill_top - 12, anchor="s",
+                                    width=self._popup_pill_w, height=48)
+        self.popup_text_frame.lift()
+        self.annot_entry.focus_set()
 
-    def _save_annotation(self):
-        text = self.annot_entry.get().strip()
+    def _confirm_popup_text(self):
+        self._save_annotation_with_text(self.annot_entry.get().strip())
+
+    def _save_annotation_with_text(self, text: str):
         if self.captured_path:
             self.galeria.append({"imagem": self.captured_path, "anotacao": text})
             for kw in self.palavrasChaves:
@@ -584,23 +663,14 @@ class SnapNoteApp:
                         pass
             self._save_data()
         self.captured_path = None
-        self._hide_annotation_sheet()
-        self._refresh_camera_thumb()
-
-    def _discard(self):
-        if self.captured_path and os.path.exists(self.captured_path):
-            try:
-                os.remove(self.captured_path)
-            except Exception:
-                pass
-        self.captured_path = None
-        self._hide_annotation_sheet()
+        self._hide_annotation_popup()
         self._refresh_camera_thumb()
 
     def _record_audio(self):
-        if not AUDIO_AVAILABLE:
+        if not AUDIO_AVAILABLE or self._mic_recording:
             return
-        self._mic_btn.configure(fg=DANGER, text="⏺")
+        self._mic_recording = True
+        self._draw_popup_pill()
 
         def run():
             try:
@@ -609,12 +679,12 @@ class SnapNoteApp:
                     rec.adjust_for_ambient_noise(src, duration=0.5)
                     audio = rec.listen(src, timeout=6, phrase_time_limit=12)
                 text = rec.recognize_google(audio, language="pt-BR")
-                self.root.after(0, lambda: self.annot_entry.delete(0, "end"))
-                self.root.after(0, lambda: self.annot_entry.insert(0, text))
+                self.root.after(0, lambda: self._save_annotation_with_text(text))
             except Exception:
                 pass
             finally:
-                self.root.after(0, lambda: self._mic_btn.configure(fg=TEXT_DIM, text="🎤"))
+                self._mic_recording = False
+                self.root.after(0, self._draw_popup_pill)
 
         threading.Thread(target=run, daemon=True).start()
 
