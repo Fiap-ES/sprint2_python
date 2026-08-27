@@ -1,9 +1,40 @@
 {
   "galeria": [
     {
-      "imagem": "C:\\Users\\Bruno\\Desktop\\sprint2_python\\fotos_capturadas\\snapnote_20260824_223020.jpg",
-      "anotacao": "dwe"
+      "imagem": "C:\\Users\\bruno.guilherme\\Desktop\\sprint2_python\\fotos_capturadas\\snapnote_20260827_140512.jpg",
+      "anotacao": "Cálculo 1 — regra da cadeia e derivada de função composta"
+    },
+    {
+      "imagem": "C:\\Users\\bruno.guilherme\\Desktop\\sprint2_python\\fotos_capturadas\\snapnote_20260827_141230.jpg",
+      "anotacao": "Lista de exercícios de cálculo 2 para praticar depois"
+    },
+    {
+      "imagem": "C:\\Users\\bruno.guilherme\\Desktop\\sprint2_python\\fotos_capturadas\\snapnote_20260827_143005.jpg",
+      "anotacao": "Física — Leis de Newton, resumo da aula de hoje"
+    },
+    {
+      "imagem": "C:\\Users\\bruno.guilherme\\Desktop\\sprint2_python\\fotos_capturadas\\snapnote_20260827_144150.jpg",
+      "anotacao": "Conteúdo que cai na prova de física do dia 22"
+    },
+    {
+      "imagem": "C:\\Users\\bruno.guilherme\\Desktop\\sprint2_python\\fotos_capturadas\\snapnote_20260827_150022.jpg",
+      "anotacao": "Física — anotações sobre termodinâmica"
+    },
+    {
+      "imagem": "C:\\Users\\bruno.guilherme\\Desktop\\sprint2_python\\fotos_capturadas\\snapnote_20260827_151340.jpg",
+      "anotacao": "Anotações da aula de anatomia"
+    },
+    {
+      "imagem": "C:\\Users\\bruno.guilherme\\Desktop\\sprint2_python\\fotos_capturadas\\snapnote_20260827_152510.jpg",
+      "anotacao": "Resumo passado na lousa"
+    },
+    {
+      "imagem": "C:\\Users\\bruno.guilherme\\Desktop\\sprint2_python\\fotos_capturadas\\snapnote_20260827_153920.jpg",
+      "anotacao": "Lousa da aula de hoje"
     }
   ],
-  "palavrasChaves": []
+  "palavrasChaves": [
+    "cálculo",
+    "Física"
+  ]
 }

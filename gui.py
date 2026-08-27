@@ -1,8 +1,24 @@
+import os
+import sys
+
+# Em algumas instalações do Python 3.13 para Windows, o python.exe copiado
+# para dentro de um venv (.venv\Scripts\python.exe) erra o cálculo do
+# caminho do Tcl/Tk (procura "lib/tcl8.6" em vez de "tcl/tcl8.6"), mesmo
+# com o Tcl/Tk instalado corretamente na instalação base. Definir essas
+# variáveis explicitamente antes de importar tkinter contorna o problema
+# sem exigir nenhuma mudança de ambiente fora do projeto.
+if sys.platform == "win32" and not os.environ.get("TCL_LIBRARY"):
+    _tcl_dir = os.path.join(sys.base_prefix, "tcl", "tcl8.6")
+    _tk_dir  = os.path.join(sys.base_prefix, "tcl", "tk8.6")
+    if os.path.isfile(os.path.join(_tcl_dir, "init.tcl")):
+        os.environ["TCL_LIBRARY"] = _tcl_dir
+    if os.path.isdir(_tk_dir):
+        os.environ["TK_LIBRARY"] = _tk_dir
+
 import tkinter as tk
-from tkinter import messagebox, simpledialog
+from tkinter import font as tkfont
 import cv2
 from PIL import Image, ImageTk, ImageDraw
-import os
 import threading
 import shutil
 import json
@@ -366,11 +382,92 @@ class SnapNoteApp:
         cv.create_line(*pt(2, 2), *pt(23, 23), fill=TEXT, width=1.6)
 
     def _rounded_photo(self, img: Image.Image, size: int, radius: int = 10):
-        img = img.convert("RGBA").resize((size, size), Image.LANCZOS)
-        mask = Image.new("L", (size, size), 0)
-        ImageDraw.Draw(mask).rounded_rectangle((0, 0, size, size), radius=radius, fill=255)
+        return self._rounded_image(img, size, size, radius)
+
+    def _rounded_image(self, img: Image.Image, w: int, h: int, radius: int = 10):
+        img = img.convert("RGBA").resize((w, h), Image.LANCZOS)
+        mask = Image.new("L", (w, h), 0)
+        ImageDraw.Draw(mask).rounded_rectangle((0, 0, w, h), radius=radius, fill=255)
         img.putalpha(mask)
         return ImageTk.PhotoImage(img)
+
+    # ── Botões e ícones reutilizáveis (galeria / diálogos) ───────────────────
+    def _make_pill_button(self, parent, text, bg, fg, command,
+                          w=140, h=40, font_size=11, bold=True):
+        cv = tk.Canvas(parent, width=w, height=h, bg=parent["bg"],
+                       highlightthickness=0, cursor="hand2")
+        r = h / 2
+        cv.create_polygon(self._pill_points(0, 0, w, h, r),
+                          smooth=True, fill=bg, outline="")
+        cv.create_text(w / 2, h / 2, text=text, fill=fg,
+                       font=(FONT, font_size, "bold" if bold else "normal"))
+        cv.bind("<Button-1>", lambda e: command())
+        return cv
+
+    def _make_circle_button(self, parent, size, draw_icon_fn, command=None,
+                            bg=None, hover_bg=None):
+        bg = bg if bg is not None else parent["bg"]
+        hover_bg = hover_bg if hover_bg is not None else bg
+        cv = tk.Canvas(parent, width=size, height=size, bg=parent["bg"],
+                       highlightthickness=0, cursor="hand2")
+
+        def render(circle_color):
+            cv.delete("all")
+            draw_icon_fn(cv)
+            bbox = cv.bbox("all")
+            if bbox:
+                bw, bh = bbox[2] - bbox[0], bbox[3] - bbox[1]
+                dx = (size - bw) / 2 - bbox[0]
+                dy = (size - bh) / 2 - bbox[1]
+                cv.move("all", dx, dy)
+            cv.create_oval(1, 1, size - 1, size - 1, fill=circle_color,
+                          outline="", tags="bg")
+            cv.tag_lower("bg")
+
+        render(bg)
+        if command:
+            cv.bind("<Button-1>", lambda e: command())
+        cv.bind("<Enter>", lambda e: render(hover_bg))
+        cv.bind("<Leave>", lambda e: render(bg))
+        return cv
+
+    def _draw_icon_chevron_left(self, cv, color):
+        cv.delete("all")
+        cv.create_line(14, 3, 7, 11, fill=color, width=1.8, capstyle="round")
+        cv.create_line(7, 11, 14, 19, fill=color, width=1.8, capstyle="round")
+
+    def _draw_icon_dots_vertical(self, cv, color):
+        cv.delete("all")
+        for cy in (6, 11, 16):
+            cv.create_oval(9.4, cy - 1.6, 12.6, cy + 1.6, fill=color, outline="")
+
+    def _draw_icon_plus(self, cv, color):
+        cv.delete("all")
+        cv.create_line(11, 4, 11, 18, fill=color, width=1.8, capstyle="round")
+        cv.create_line(4, 11, 18, 11, fill=color, width=1.8, capstyle="round")
+
+    def _draw_icon_tag(self, cv, color):
+        cv.delete("all")
+        cv.create_polygon(3, 4, 11, 4, 19, 12, 11, 20, 3, 12,
+                          outline=color, fill="", width=1.4, joinstyle="round")
+        cv.create_oval(13, 6, 16, 9, outline=color, width=1.2)
+
+    def _draw_icon_trash(self, cv, color):
+        cv.delete("all")
+        cv.create_line(4, 6, 18, 6, fill=color, width=1.5, capstyle="round")
+        cv.create_line(8.5, 6, 9, 3.5, fill=color, width=1.3)
+        cv.create_line(13.5, 6, 13, 3.5, fill=color, width=1.3)
+        cv.create_line(9, 3.5, 13, 3.5, fill=color, width=1.3)
+        cv.create_rectangle(5.5, 6, 16.5, 19, outline=color, width=1.4)
+        for x in (8.5, 11, 13.5):
+            cv.create_line(x, 9, x, 16, fill=color, width=1.1)
+
+    def _draw_icon_gallery_empty(self, cv, color):
+        cv.delete("all")
+        cv.create_rectangle(3, 6, 33, 30, outline=color, width=1.6)
+        cv.create_oval(9, 12, 15, 18, outline=color, width=1.4)
+        cv.create_line(3, 26, 14, 17, 21, 23, 27, 18, 33, 24,
+                       fill=color, width=1.6, smooth=True)
 
     def _refresh_camera_thumb(self):
         if not hasattr(self, "gallery_thumb_btn"):
@@ -694,56 +791,65 @@ class SnapNoteApp:
         self.screens["gallery"] = f
 
         # Header
-        header = tk.Frame(f, bg=BG, height=52)
+        header = tk.Frame(f, bg=BG, height=56)
         header.pack(fill="x")
         header.pack_propagate(False)
 
-        back_lbl = tk.Label(header, text="←", font=(FONT, 16),
-                            bg=BG, fg=TEXT, cursor="hand2", padx=12)
-        back_lbl.place(x=4, rely=0.5, anchor="w")
-        back_lbl.bind("<Button-1>", lambda e: self.show_screen("camera"))
+        back_btn = self._make_circle_button(
+            header, 38, lambda cv: self._draw_icon_chevron_left(cv, TEXT),
+            command=lambda: self.show_screen("camera"), bg=BG, hover_bg=SURFACE2)
+        back_btn.place(x=10, rely=0.5, anchor="w")
 
-        tk.Label(header, text="Galeria", font=(FONT, 18, "bold"),
-                 bg=BG, fg=TEXT).place(x=44, rely=0.5, anchor="w")
+        tk.Label(header, text="Galeria", font=(FONT, 17, "bold"),
+                 bg=BG, fg=TEXT).place(x=56, rely=0.5, anchor="w")
 
-        menu_lbl = tk.Label(header, text="⋮", font=(FONT, 21),
-                            bg=BG, fg=TEXT, cursor="hand2", padx=12, pady=4)
-        menu_lbl.place(relx=1.0, x=-4, rely=0.5, anchor="e")
-        menu_lbl.bind("<Button-1>", self._show_gallery_menu)
+        menu_btn = self._make_circle_button(
+            header, 38, lambda cv: self._draw_icon_dots_vertical(cv, TEXT),
+            command=lambda: self._show_gallery_menu(None), bg=BG, hover_bg=SURFACE2)
+        menu_btn.place(relx=1.0, x=-10, rely=0.5, anchor="e")
 
-        search_toggle = tk.Canvas(header, width=26, height=26, bg=BG,
-                                  highlightthickness=0, cursor="hand2")
-        search_toggle.place(relx=1.0, x=-40, rely=0.5, anchor="e")
-        self._draw_icon_search(search_toggle, TEXT)
-        search_toggle.bind("<Button-1>", lambda e: self._toggle_gallery_search())
+        search_toggle = self._make_circle_button(
+            header, 38, lambda cv: self._draw_icon_search(cv, TEXT),
+            command=self._toggle_gallery_search, bg=BG, hover_bg=SURFACE2)
+        search_toggle.place(relx=1.0, x=-48, rely=0.5, anchor="e")
 
         # Separador
         tk.Frame(f, bg=BORDER, height=1).pack(fill="x")
 
-        # Barra de busca (oculta por padrão)
+        # Barra de busca (oculta por padrão, pílula arredondada de verdade)
         self._gallery_search_wrap = tk.Frame(f, bg=BG, pady=10)
 
-        input_bg = tk.Frame(self._gallery_search_wrap, bg=SURFACE2,
-                            highlightbackground=BORDER, highlightthickness=1)
-        input_bg.pack(fill="x", padx=16, ipady=2)
+        sb_w, sb_h = W - 32, 44
+        search_cv = tk.Canvas(self._gallery_search_wrap, width=sb_w, height=sb_h,
+                              bg=BG, highlightthickness=0)
+        search_cv.pack(padx=16)
 
-        icon_cv = tk.Canvas(input_bg, width=20, height=20, bg=SURFACE2,
-                            highlightthickness=0)
-        icon_cv.pack(side="left", padx=(10, 0))
-        icon_cv.create_oval(3, 3, 14, 14, outline=TEXT_DIM, width=1.5)
-        icon_cv.create_line(13, 13, 18, 18, fill=TEXT_DIM, width=1.5)
+        search_cv.create_polygon(self._pill_points(0, 0, sb_w, sb_h, sb_h / 2),
+                                 smooth=True, fill=SURFACE2, outline="")
+        search_cv.create_oval(16, 14, 26, 24, outline=TEXT_DIM, width=1.5)
+        search_cv.create_line(24, 22, 30, 28, fill=TEXT_DIM, width=1.5)
 
         self.gal_search_entry = tk.Entry(
-            input_bg, font=(FONT, 11), bg=SURFACE2, fg=TEXT,
-            insertbackground=TEXT, relief="flat", bd=8,
+            search_cv, font=(FONT, 11), bg=SURFACE2, fg=TEXT,
+            insertbackground=TEXT, relief="flat", bd=0, highlightthickness=0,
         )
-        self.gal_search_entry.pack(side="left", fill="x", expand=True)
+        search_cv.create_window(40, sb_h / 2, anchor="w", window=self.gal_search_entry,
+                                width=sb_w - 40 - 36)
         self.gal_search_entry.bind("<KeyRelease>", lambda e: self._render_grid())
 
-        close_lbl = tk.Label(input_bg, text="✕", font=(FONT, 11),
-                             bg=SURFACE2, fg=TEXT_DIM, cursor="hand2", padx=8)
-        close_lbl.pack(side="right")
-        close_lbl.bind("<Button-1>", lambda e: self._toggle_gallery_search(force_close=True))
+        cx, cy = sb_w - 22, sb_h / 2
+        search_cv.create_line(cx - 5, cy - 5, cx + 5, cy + 5, fill=TEXT_DIM,
+                              width=1.5, tags="close")
+        search_cv.create_line(cx - 5, cy + 5, cx + 5, cy - 5, fill=TEXT_DIM,
+                              width=1.5, tags="close")
+        search_cv.create_rectangle(cx - 14, 0, cx + 14, sb_h, fill="", outline="",
+                                   tags="close")
+        search_cv.tag_bind("close", "<Button-1>",
+                           lambda e: self._toggle_gallery_search(force_close=True))
+        search_cv.tag_bind("close", "<Enter>",
+                           lambda e: search_cv.configure(cursor="hand2"))
+        search_cv.tag_bind("close", "<Leave>",
+                           lambda e: search_cv.configure(cursor=""))
 
         # Tabs de pastas
         self._gallery_tabs_outer = tabs_outer = tk.Frame(f, bg=BG, height=44)
@@ -769,11 +875,7 @@ class SnapNoteApp:
 
         self.gal_canvas  = tk.Canvas(grid_frame, bg=BG,
                                      highlightthickness=0, bd=0)
-        gal_scroll       = tk.Scrollbar(grid_frame, orient="vertical",
-                                        command=self.gal_canvas.yview)
-        self.gal_canvas.configure(yscrollcommand=gal_scroll.set)
-        self.gal_canvas.pack(side="left", fill="both", expand=True)
-        gal_scroll.pack(side="right", fill="y")
+        self.gal_canvas.pack(fill="both", expand=True)
 
         self.gal_inner = tk.Frame(self.gal_canvas, bg=BG)
         self._gal_win  = self.gal_canvas.create_window(
@@ -782,8 +884,12 @@ class SnapNoteApp:
         self.gal_inner.bind("<Configure>",
             lambda e: self.gal_canvas.configure(
                 scrollregion=self.gal_canvas.bbox("all")))
-        self.gal_canvas.bind("<MouseWheel>",
-            lambda e: self.gal_canvas.yview_scroll(-1 * (e.delta // 120), "units"))
+        self._bind_wheel(self.gal_canvas)
+        self._bind_wheel(self.gal_inner)
+
+    def _bind_wheel(self, widget):
+        widget.bind("<MouseWheel>",
+                    lambda e: self.gal_canvas.yview_scroll(-1 * (e.delta // 120), "units"))
 
     def _refresh_gallery(self):
         self._update_tabs()
@@ -804,19 +910,22 @@ class SnapNoteApp:
         for w in self._tabs_inner.winfo_children():
             w.destroy()
 
+        fnt = tkfont.Font(family=FONT, size=9, weight="bold")
+        pill_h = 32
         for folder in ["Todas"] + self.palavrasChaves:
-            active   = folder == self.gallery_folder
-            bg_color = SURFACE2 if active else SURFACE
-            fg_color = TEXT     if active else TEXT_DIM
-            weight   = "bold"   if active else "normal"
+            active  = folder == self.gallery_folder
+            pill_w  = fnt.measure(folder) + 28
 
-            tab = tk.Label(self._tabs_inner, text=folder,
-                           font=(FONT, 9, weight),
-                           bg=bg_color, fg=fg_color,
-                           padx=14, pady=6, cursor="hand2")
-            tab.pack(side="left", padx=(0, 6))
-            tab.bind("<Button-1>",
-                     lambda e, fo=folder: self._select_tab(fo))
+            cv = tk.Canvas(self._tabs_inner, width=pill_w, height=pill_h,
+                           bg=BG, highlightthickness=0, cursor="hand2")
+            cv.pack(side="left", padx=(0, 8))
+            fill = GOLD if active else SURFACE2
+            fg   = "#1A1400" if active else TEXT_DIM
+            cv.create_polygon(self._pill_points(0, 0, pill_w, pill_h, pill_h / 2),
+                              smooth=True, fill=fill, outline="")
+            cv.create_text(pill_w / 2, pill_h / 2, text=folder, fill=fg,
+                           font=(FONT, 9, "bold" if active else "normal"))
+            cv.bind("<Button-1>", lambda e, fo=folder: self._select_tab(fo))
 
     def _select_tab(self, folder: str):
         self.gallery_folder = folder
@@ -833,20 +942,27 @@ class SnapNoteApp:
             images = [i for i in images if query in i.get("anotacao", "").lower()]
 
         if not images:
+            empty = tk.Frame(self.gal_inner, bg=BG, pady=70)
+            empty.pack(fill="x")
+            icon_cv = tk.Canvas(empty, width=36, height=36, bg=BG,
+                                highlightthickness=0)
+            icon_cv.pack()
+            self._draw_icon_gallery_empty(icon_cv, TEXT_DIM)
             msg = "Nenhum resultado" if query else "Nenhuma foto ainda"
-            tk.Label(self.gal_inner, text=msg,
-                     font=(FONT, 12), bg=BG, fg=TEXT_DIM,
-                     pady=60).pack()
+            tk.Label(empty, text=msg, font=(FONT, 12), bg=BG, fg=TEXT_DIM,
+                     pady=10).pack()
             return
 
-        # Calcula largura do thumb (2 colunas, sem scrollbar ~15px)
-        gap    = 2
-        ncols  = 2
-        thumb_w = (W - 15 - gap * (ncols - 1)) // ncols
+        # Calcula largura do thumb (2 colunas, sem barra de rolagem visível)
+        gap     = 10
+        ncols   = 2
+        cap_h   = 30
+        thumb_w = (W - gap * (ncols - 1)) // ncols
         thumb_h = thumb_w
+        cell_h  = thumb_h + cap_h
 
         # Atualiza largura interna
-        self.gal_canvas.itemconfig(self._gal_win, width=W - 15)
+        self.gal_canvas.itemconfig(self._gal_win, width=W)
 
         row_frame = None
         for idx, item in enumerate(images):
@@ -854,25 +970,26 @@ class SnapNoteApp:
             if col == 0:
                 row_frame = tk.Frame(self.gal_inner, bg=BG)
                 row_frame.pack(fill="x", pady=(0, gap))
+                self._bind_wheel(row_frame)
 
-            cell = tk.Frame(row_frame, bg=SURFACE2,
-                            width=thumb_w, height=thumb_h,
+            cell = tk.Frame(row_frame, bg=BG, width=thumb_w, height=cell_h,
                             cursor="hand2")
-            cell.pack(side="left", padx=(0 if col > 0 else 0, gap if col == 0 else 0))
+            cell.pack(side="left", padx=(0, gap if col == 0 else 0))
             cell.pack_propagate(False)
+            self._bind_wheel(cell)
 
-            img_lbl = tk.Label(cell, bg=SURFACE2, cursor="hand2")
+            img_lbl = tk.Label(cell, bg=BG, cursor="hand2")
             img_lbl.place(x=0, y=0, width=thumb_w, height=thumb_h)
             self._load_thumb(item["imagem"], img_lbl, thumb_w, thumb_h)
+            self._bind_wheel(img_lbl)
 
-            # Faixa de anotação na parte inferior
             annot = item.get("anotacao", "")
-            if annot:
-                strip = tk.Frame(cell, bg="#111111")
-                strip.place(x=0, y=thumb_h - 22, width=thumb_w, height=22)
-                tk.Label(strip, text=annot[:32], font=(FONT, 7),
-                         bg="#111111", fg="#DDDDDD",
-                         anchor="w", padx=4).place(x=0, y=3)
+            cap_text = (annot[:26] + "…") if len(annot) > 26 else annot
+            cap_lbl = tk.Label(cell, text=cap_text or "Sem legenda", font=(FONT, 8),
+                               bg=BG, fg=TEXT_DIM if annot else "#3A3A3C",
+                               anchor="w")
+            cap_lbl.place(x=1, y=thumb_h + 6, width=thumb_w - 2, height=cap_h - 6)
+            self._bind_wheel(cap_lbl)
 
             path = item["imagem"]
             for widget in (cell, img_lbl):
@@ -904,155 +1021,284 @@ class SnapNoteApp:
             m   = min(ew, eh)
             img = img.crop(((ew - m) // 2, (eh - m) // 2,
                             (ew + m) // 2, (eh + m) // 2))
-            img = img.resize((w, h), Image.LANCZOS)
-            ref = ImageTk.PhotoImage(img)
+            ref = self._rounded_image(img, w, h, radius=16)
             self._thumb_refs.append(ref)
             label.configure(image=ref)
         except Exception:
             label.configure(text="?", fg=TEXT_DIM, font=(FONT, 20))
 
     # ── Detalhe da imagem ─────────────────────────────────────────────────────
+    def _format_capture_meta(self, path: str) -> str:
+        name = os.path.basename(path)
+        try:
+            stem = name.rsplit(".", 1)[0]
+            ts_part = stem.split("_", 1)[1]
+            dt = datetime.strptime(ts_part, "%Y%m%d_%H%M%S")
+            return dt.strftime("%d/%m/%Y às %H:%M")
+        except Exception:
+            return name
+
     def _open_detail(self, path: str, annotation: str):
         win = tk.Toplevel(self.root)
-        win.title("")
+        win.title("SnapNote")
         win.geometry(f"{W}x{CONTENT_H}+{self.root.winfo_x()}+{self.root.winfo_y()}")
         win.configure(bg=BG)
         win.resizable(False, False)
         win.grab_set()
-
-        # Header
-        header = tk.Frame(win, bg=BG, height=50)
-        header.pack(fill="x")
-        back = tk.Label(header, text="← Voltar", font=(FONT, 11),
-                        bg=BG, fg=TEXT, cursor="hand2", padx=16)
-        back.place(x=0, rely=0.5, anchor="w")
-        back.bind("<Button-1>", lambda e: win.destroy())
         win.bind("<Escape>", lambda e: win.destroy())
 
-        # Imagem
+        # Header
+        header = tk.Frame(win, bg=BG, height=54)
+        header.pack(fill="x")
+        header.pack_propagate(False)
+        back_btn = self._make_circle_button(
+            header, 36, lambda cv: self._draw_icon_chevron_left(cv, TEXT),
+            command=win.destroy, bg=BG, hover_bg=SURFACE2)
+        back_btn.place(x=10, rely=0.5, anchor="w")
+        tk.Label(header, text="Detalhes", font=(FONT, 13, "bold"),
+                 bg=BG, fg=TEXT).place(relx=0.5, rely=0.5, anchor="center")
+
+        # Imagem (cantos arredondados)
+        img_wrap = tk.Frame(win, bg=BG)
+        img_wrap.pack(fill="x", padx=16)
         try:
             img = Image.open(path)
-            img.thumbnail((W, W))
-            ref       = ImageTk.PhotoImage(img)
-            win._ref  = ref
-            tk.Label(win, image=ref, bg="black").pack(fill="x")
+            img.thumbnail((W - 32, W - 32))
+            ref      = self._rounded_image(img, img.width, img.height, radius=18)
+            win._ref = ref
+            tk.Label(img_wrap, image=ref, bg=BG).pack()
         except Exception:
-            tk.Label(win, text="Imagem inválida", bg=BG, fg=TEXT_DIM,
-                     font=(FONT, 12), pady=20).pack()
+            tk.Label(img_wrap, text="Imagem inválida", bg=SURFACE, fg=TEXT_DIM,
+                     font=(FONT, 12), pady=40).pack(fill="x")
 
         # Anotação
-        annot_frame = tk.Frame(win, bg=SURFACE, padx=20, pady=14)
-        annot_frame.pack(fill="x")
-        tk.Label(annot_frame, text="Anotação", font=(FONT, 11, "bold"),
-                 bg=SURFACE, fg=TEXT).pack(anchor="w")
+        annot_frame = tk.Frame(win, bg=SURFACE, padx=20, pady=16)
+        annot_frame.pack(fill="x", padx=16, pady=16)
+        tk.Label(annot_frame, text="ANOTAÇÃO", font=(FONT, 9, "bold"),
+                 bg=SURFACE, fg=GOLD).pack(anchor="w")
         msg = annotation if annotation else "Sem anotação"
         tk.Label(annot_frame, text=msg, font=(FONT, 11),
-                 bg=SURFACE, fg=TEXT_DIM, wraplength=W - 40,
-                 justify="left", anchor="w").pack(fill="x", pady=(4, 0))
+                 bg=SURFACE, fg=TEXT if annotation else TEXT_DIM,
+                 wraplength=W - 72, justify="left", anchor="w").pack(
+                     fill="x", pady=(6, 0))
 
-        # Nome do arquivo
-        tk.Label(win, text=os.path.basename(path), font=(FONT, 8),
+        tk.Label(win, text=self._format_capture_meta(path), font=(FONT, 8),
                  bg=BG, fg=TEXT_DIM, padx=20, pady=6).pack(anchor="w")
 
     # ── Menu ⋮ da galeria ─────────────────────────────────────────────────────
-    def _show_gallery_menu(self, event):
+    def _show_gallery_menu(self, event=None):
         popup = tk.Toplevel(self.root)
         popup.overrideredirect(True)
-        popup.configure(bg=SURFACE2,
-                        highlightbackground=BORDER, highlightthickness=1)
-        menu_w = 210
-        mx     = self.root.winfo_x() + W - menu_w - 8
-        my     = self.root.winfo_y() + 58
-        popup.geometry(f"{menu_w}x0+{mx}+{my}")
+        popup.configure(bg=BG)
 
+        menu_w, row_h = 236, 50
         options = [
-            ("  Nova palavra-chave",    self._add_keyword),
-            ("  Gerenciar palavras-chave", self._manage_keywords),
+            (self._draw_icon_plus, "Nova palavra-chave",    self._add_keyword),
+            (self._draw_icon_tag,  "Gerenciar palavras-chave", self._manage_keywords),
         ]
+        total_h = row_h * len(options) + 8
+        mx = self.root.winfo_x() + W - menu_w - 12
+        my = self.root.winfo_y() + 62
+        popup.geometry(f"{menu_w}x{total_h}+{mx}+{my}")
 
-        for i, (label, cmd) in enumerate(options):
+        cv = tk.Canvas(popup, width=menu_w, height=total_h, bg=BG,
+                       highlightthickness=0)
+        cv.pack(fill="both", expand=True)
+        cv.create_polygon(self._pill_points(0, 0, menu_w, total_h, 16),
+                          smooth=True, fill=SURFACE2, outline=BORDER)
+
+        for i, (icon_fn, label, cmd) in enumerate(options):
+            y0, y1 = 4 + i * row_h, 4 + (i + 1) * row_h
+            tag = f"row{i}"
+            cv.create_rectangle(2, y0, menu_w - 2, y1, fill="", outline="",
+                                tags=tag)
             if i > 0:
-                tk.Frame(popup, bg=BORDER, height=1).pack(fill="x")
-            item = tk.Label(popup, text=label, font=(FONT, 10),
-                            bg=SURFACE2, fg=TEXT, anchor="w",
-                            pady=12, cursor="hand2")
-            item.pack(fill="x")
-            item.bind("<Enter>", lambda e, w=item: w.configure(bg=SURFACE))
-            item.bind("<Leave>", lambda e, w=item: w.configure(bg=SURFACE2))
+                cv.create_line(16, y0, menu_w - 16, y0, fill=BORDER)
+
+            icon_cv = tk.Canvas(cv, width=22, height=22, bg=SURFACE2,
+                                highlightthickness=0)
+            icon_fn(icon_cv, TEXT)
+            cv.create_window(20, (y0 + y1) / 2, anchor="w", window=icon_cv)
+            cv.create_text(50, (y0 + y1) / 2, text=label, fill=TEXT,
+                           anchor="w", font=(FONT, 10), tags=tag)
 
             def on_click(e, c=cmd):
                 popup.destroy()
                 c()
 
-            item.bind("<Button-1>", on_click)
+            cv.tag_bind(tag, "<Button-1>", on_click)
+            cv.tag_bind(tag, "<Enter>", lambda e, t=tag: cv.itemconfig(t, fill=SURFACE))
+            cv.tag_bind(tag, "<Leave>", lambda e, t=tag: cv.itemconfig(t, fill=""))
 
-        popup.update_idletasks()
-        total_h = sum(w.winfo_reqheight() for w in popup.winfo_children())
-        popup.geometry(f"{menu_w}x{total_h}+{mx}+{my}")
         popup.focus_set()
         popup.bind("<FocusOut>", lambda e: popup.destroy())
 
+    # ── Diálogos estilizados (substituem simpledialog/messagebox nativos) ────
+    def _center_dialog(self, win, dw, dh):
+        win.geometry(f"{dw}x{dh}+{self.root.winfo_x() + (W - dw) // 2}+"
+                     f"{self.root.winfo_y() + (H - dh) // 2}")
+
+    def _finalize_dialog(self, win, card, dw):
+        """Mede a altura real do conteúdo e só então posiciona/mostra a
+        janela — evita cortar botões quando o texto ocupa mais espaço do
+        que uma altura fixa "chutada" previa."""
+        win.update_idletasks()
+        self._center_dialog(win, dw, card.winfo_reqheight())
+        win.deiconify()
+        win.grab_set()
+        win.focus_set()
+
+    def _info_dialog(self, title: str, message: str):
+        win = tk.Toplevel(self.root)
+        win.withdraw()
+        win.overrideredirect(True)
+        win.configure(bg=BG)
+        win.bind("<Escape>", lambda e: win.destroy())
+
+        card = tk.Frame(win, bg=SURFACE2, padx=20, pady=18)
+        card.pack(fill="both", expand=True)
+        tk.Label(card, text=title, font=(FONT, 13, "bold"),
+                 bg=SURFACE2, fg=TEXT).pack(anchor="w")
+        tk.Label(card, text=message, font=(FONT, 10), bg=SURFACE2, fg=TEXT_DIM,
+                 justify="left", wraplength=240).pack(anchor="w", pady=(6, 16))
+
+        btn_row = tk.Frame(card, bg=SURFACE2)
+        btn_row.pack(fill="x", side="bottom")
+        self._make_pill_button(btn_row, "OK", GOLD, "black", win.destroy,
+                               w=100, h=36, font_size=10).pack(side="right")
+
+        self._finalize_dialog(win, card, 280)
+
+    def _confirm_dialog(self, title: str, message: str, on_confirm,
+                        confirm_label="Remover"):
+        win = tk.Toplevel(self.root)
+        win.withdraw()
+        win.overrideredirect(True)
+        win.configure(bg=BG)
+        win.bind("<Escape>", lambda e: win.destroy())
+
+        card = tk.Frame(win, bg=SURFACE2, padx=20, pady=18)
+        card.pack(fill="both", expand=True)
+        tk.Label(card, text=title, font=(FONT, 13, "bold"),
+                 bg=SURFACE2, fg=TEXT).pack(anchor="w")
+        tk.Label(card, text=message, font=(FONT, 10), bg=SURFACE2, fg=TEXT_DIM,
+                 justify="left", wraplength=260).pack(anchor="w", pady=(6, 16))
+
+        def yes():
+            win.destroy()
+            on_confirm()
+
+        btn_row = tk.Frame(card, bg=SURFACE2)
+        btn_row.pack(fill="x", side="bottom")
+        self._make_pill_button(btn_row, "Cancelar", SURFACE, TEXT_DIM, win.destroy,
+                               w=118, h=38, font_size=10, bold=False).pack(side="left")
+        self._make_pill_button(btn_row, confirm_label, DANGER, "white", yes,
+                               w=118, h=38, font_size=10).pack(side="right")
+
+        self._finalize_dialog(win, card, 300)
+
     # ── Gerenciamento de palavras-chave ───────────────────────────────────────
     def _add_keyword(self):
-        kw = simpledialog.askstring(
-            "Nova palavra-chave",
-            "Digite a palavra-chave (sem espaços):",
-            parent=self.root,
-        )
-        if not kw:
-            return
-        kw = kw.strip().replace(" ", "_")
-        if not kw or kw in self.palavrasChaves:
-            return
-        self.palavrasChaves.append(kw)
-        folder = os.path.join(os.getcwd(), kw)
-        os.makedirs(folder, exist_ok=True)
-        for item in self.galeria:
-            if kw.lower() in item.get("anotacao", "").lower():
-                dest = os.path.join(folder, os.path.basename(item["imagem"]))
-                try:
-                    shutil.copy2(item["imagem"], dest)
-                except Exception:
-                    pass
-        self._save_data()
-        self._refresh_gallery()
+        win = tk.Toplevel(self.root)
+        win.withdraw()
+        win.overrideredirect(True)
+        win.configure(bg=BG)
+
+        card = tk.Frame(win, bg=SURFACE2, padx=20, pady=18)
+        card.pack(fill="both", expand=True)
+        tk.Label(card, text="Nova palavra-chave", font=(FONT, 13, "bold"),
+                 bg=SURFACE2, fg=TEXT).pack(anchor="w")
+        tk.Label(card, text="Fotos com essa palavra na anotação são\n"
+                            "organizadas automaticamente numa pasta.",
+                 font=(FONT, 9), bg=SURFACE2, fg=TEXT_DIM,
+                 justify="left").pack(anchor="w", pady=(4, 12))
+
+        entry_bg = tk.Frame(card, bg=SURFACE,
+                            highlightbackground=BORDER, highlightthickness=1)
+        entry_bg.pack(fill="x")
+        entry = tk.Entry(entry_bg, font=(FONT, 11), bg=SURFACE, fg=TEXT,
+                         insertbackground=TEXT, relief="flat", bd=8)
+        entry.pack(fill="x")
+        entry.focus_set()
+
+        def confirm():
+            kw = entry.get().strip().replace(" ", "_")
+            win.destroy()
+            if not kw or kw in self.palavrasChaves:
+                return
+            self.palavrasChaves.append(kw)
+            folder = os.path.join(os.getcwd(), kw)
+            os.makedirs(folder, exist_ok=True)
+            for item in self.galeria:
+                if kw.lower() in item.get("anotacao", "").lower():
+                    dest = os.path.join(folder, os.path.basename(item["imagem"]))
+                    try:
+                        shutil.copy2(item["imagem"], dest)
+                    except Exception:
+                        pass
+            self._save_data()
+            self._refresh_gallery()
+
+        entry.bind("<Return>", lambda e: confirm())
+        win.bind("<Escape>", lambda e: win.destroy())
+
+        btn_row = tk.Frame(card, bg=SURFACE2)
+        btn_row.pack(fill="x", pady=(16, 0))
+        self._make_pill_button(btn_row, "Cancelar", SURFACE, TEXT_DIM, win.destroy,
+                               w=118, h=38, font_size=10, bold=False).pack(side="left")
+        self._make_pill_button(btn_row, "Adicionar", GOLD, "black", confirm,
+                               w=118, h=38, font_size=10).pack(side="right")
+
+        self._finalize_dialog(win, card, 300)
 
     def _manage_keywords(self):
         if not self.palavrasChaves:
-            messagebox.showinfo("Palavras-chave",
-                                "Nenhuma palavra-chave cadastrada.", parent=self.root)
+            self._info_dialog("Palavras-chave", "Nenhuma palavra-chave cadastrada.")
             return
 
         win = tk.Toplevel(self.root)
+        win.withdraw()
         win.title("Palavras-chave")
-        win.geometry(f"360x{min(400, 60 + len(self.palavrasChaves) * 56)}+"
-                     f"{self.root.winfo_x() + 15}+{self.root.winfo_y() + 80}")
         win.configure(bg=BG)
         win.resizable(False, False)
-        win.grab_set()
 
-        tk.Label(win, text="Palavras-chave", font=(FONT, 14, "bold"),
-                 bg=BG, fg=TEXT, pady=14).pack()
-        tk.Frame(win, bg=BORDER, height=1).pack(fill="x", padx=16)
+        body = tk.Frame(win, bg=BG)
+        body.pack(fill="both", expand=True)
+
+        tk.Label(body, text="Palavras-chave", font=(FONT, 14, "bold"),
+                 bg=BG, fg=TEXT, pady=16).pack()
+        tk.Frame(body, bg=BORDER, height=1).pack(fill="x", padx=18)
+
+        list_frame = tk.Frame(body, bg=BG)
+        list_frame.pack(fill="both", expand=True, padx=18, pady=(12, 14))
 
         for kw in list(self.palavrasChaves):
-            row = tk.Frame(win, bg=SURFACE, padx=16, pady=12)
-            row.pack(fill="x", padx=16, pady=(4, 0))
-            tk.Label(row, text=kw, font=(FONT, 11),
-                     bg=SURFACE, fg=TEXT).pack(side="left")
-            del_btn = tk.Label(row, text="✕", font=(FONT, 12),
-                               bg=SURFACE, fg=DANGER, cursor="hand2")
-            del_btn.pack(side="right")
+            row = tk.Frame(list_frame, bg=SURFACE2)
+            row.pack(fill="x", pady=(0, 8))
+            tk.Label(row, text=f"#{kw}", font=(FONT, 11), bg=SURFACE2, fg=TEXT,
+                     padx=14, pady=12).pack(side="left")
+            del_btn = self._make_circle_button(
+                row, 30, lambda cv: self._draw_icon_trash(cv, DANGER),
+                command=lambda k=kw, w=win: self._confirm_delete_keyword(k, w),
+                bg=SURFACE2, hover_bg=SURFACE)
+            del_btn.pack(side="right", padx=10)
 
-            def on_del(e, k=kw, w=win):
-                if messagebox.askyesno("Remover",
-                                       f"Remover a palavra-chave '{k}' e sua pasta?",
-                                       parent=w):
-                    self._delete_keyword(k)
-                    w.destroy()
-                    self._manage_keywords()
+        win.update_idletasks()
+        dw, dh = 320, min(460, body.winfo_reqheight())
+        win.geometry(f"{dw}x{dh}+{self.root.winfo_x() + 35}+{self.root.winfo_y() + 90}")
+        win.deiconify()
+        win.grab_set()
 
-            del_btn.bind("<Button-1>", on_del)
+    def _confirm_delete_keyword(self, kw: str, manage_win: tk.Toplevel):
+        def do_delete():
+            self._delete_keyword(kw)
+            manage_win.destroy()
+            self._manage_keywords()
+
+        self._confirm_dialog(
+            "Remover palavra-chave",
+            f'Remover "{kw}" e apagar a pasta com as fotos organizadas nela?',
+            do_delete)
 
     def _delete_keyword(self, kw: str):
         if kw in self.palavrasChaves:
