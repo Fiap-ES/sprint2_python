@@ -44,6 +44,9 @@ DANGER   = "#FF453A"
 SUCCESS  = "#30D158"
 ICON_DIM = "#D6D6D6"
 
+MESES_PT = ["jan", "fev", "mar", "abr", "mai", "jun",
+            "jul", "ago", "set", "out", "nov", "dez"]
+
 # GOLD e a família de fonte vêm de theme.py (fonte única de verdade).
 # FONT só ganha o valor definitivo dentro de SnapNoteApp.__init__, depois
 # que theme.resolve_fonts() roda (precisa de um root do Tk já existente).
@@ -69,6 +72,7 @@ class SnapNoteApp:
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
         self.root.geometry(f"{W}x{H}+{(sw - W) // 2}+{(sh - H) // 2}")
+        theme.apply_dark_titlebar(self.root)
 
         # Estado
         self.galeria: list[dict] = []
@@ -115,12 +119,16 @@ class SnapNoteApp:
         self._scan_disk()
 
     def _scan_disk(self):
-        known = {i["imagem"] for i in self.galeria}
+        # normcase (minúsculas + separadores) evita duplicar a mesma foto
+        # quando a letra do drive vem em case diferente do salvo no JSON
+        # (ex.: "C:\..." vs "c:\...") — Windows trata isso como o mesmo
+        # arquivo, mas comparar como texto puro não.
+        known = {os.path.normcase(os.path.normpath(i["imagem"])) for i in self.galeria}
         if os.path.isdir(self.pastaFotos):
             for name in sorted(os.listdir(self.pastaFotos)):
                 if name.lower().endswith((".jpg", ".jpeg", ".png")):
                     p = os.path.join(self.pastaFotos, name)
-                    if p not in known:
+                    if os.path.normcase(os.path.normpath(p)) not in known:
                         self.galeria.append({"imagem": p, "anotacao": ""})
 
     def _save_data(self):
@@ -722,8 +730,6 @@ class SnapNoteApp:
 
         self.popup_backdrop.place(x=0, y=0, width=W, height=H)
         self.popup_pill.place(relx=0.5, rely=self._popup_rely, anchor="center")
-        self.popup_backdrop.lift()
-        self.popup_pill.lift()
 
     def _hide_annotation_popup(self):
         self.popup_pill.place_forget()
@@ -740,7 +746,7 @@ class SnapNoteApp:
         pill_top = int(H * self._popup_rely) - self._popup_pill_h // 2
         self.popup_text_frame.place(relx=0.5, y=pill_top - 12, anchor="s",
                                     width=self._popup_pill_w, height=48)
-        self.popup_text_frame.lift()
+        self.popup_text_frame.tkraise()
         self.annot_entry.focus_set()
 
     def _confirm_popup_text(self):
@@ -790,91 +796,12 @@ class SnapNoteApp:
         f = tk.Frame(self.container, bg=BG)
         self.screens["gallery"] = f
 
-        # Header
-        header = tk.Frame(f, bg=BG, height=56)
-        header.pack(fill="x")
-        header.pack_propagate(False)
-
-        back_btn = self._make_circle_button(
-            header, 38, lambda cv: self._draw_icon_chevron_left(cv, TEXT),
-            command=lambda: self.show_screen("camera"), bg=BG, hover_bg=SURFACE2)
-        back_btn.place(x=10, rely=0.5, anchor="w")
-
-        tk.Label(header, text="Galeria", font=(FONT, 17, "bold"),
-                 bg=BG, fg=TEXT).place(x=56, rely=0.5, anchor="w")
-
-        menu_btn = self._make_circle_button(
-            header, 38, lambda cv: self._draw_icon_dots_vertical(cv, TEXT),
-            command=lambda: self._show_gallery_menu(None), bg=BG, hover_bg=SURFACE2)
-        menu_btn.place(relx=1.0, x=-10, rely=0.5, anchor="e")
-
-        search_toggle = self._make_circle_button(
-            header, 38, lambda cv: self._draw_icon_search(cv, TEXT),
-            command=self._toggle_gallery_search, bg=BG, hover_bg=SURFACE2)
-        search_toggle.place(relx=1.0, x=-48, rely=0.5, anchor="e")
-
-        # Separador
-        tk.Frame(f, bg=BORDER, height=1).pack(fill="x")
-
-        # Barra de busca (oculta por padrão, pílula arredondada de verdade)
-        self._gallery_search_wrap = tk.Frame(f, bg=BG, pady=10)
-
-        sb_w, sb_h = W - 32, 44
-        search_cv = tk.Canvas(self._gallery_search_wrap, width=sb_w, height=sb_h,
-                              bg=BG, highlightthickness=0)
-        search_cv.pack(padx=16)
-
-        search_cv.create_polygon(self._pill_points(0, 0, sb_w, sb_h, sb_h / 2),
-                                 smooth=True, fill=SURFACE2, outline="")
-        search_cv.create_oval(16, 14, 26, 24, outline=TEXT_DIM, width=1.5)
-        search_cv.create_line(24, 22, 30, 28, fill=TEXT_DIM, width=1.5)
-
-        self.gal_search_entry = tk.Entry(
-            search_cv, font=(FONT, 11), bg=SURFACE2, fg=TEXT,
-            insertbackground=TEXT, relief="flat", bd=0, highlightthickness=0,
-        )
-        search_cv.create_window(40, sb_h / 2, anchor="w", window=self.gal_search_entry,
-                                width=sb_w - 40 - 36)
-        self.gal_search_entry.bind("<KeyRelease>", lambda e: self._render_grid())
-
-        cx, cy = sb_w - 22, sb_h / 2
-        search_cv.create_line(cx - 5, cy - 5, cx + 5, cy + 5, fill=TEXT_DIM,
-                              width=1.5, tags="close")
-        search_cv.create_line(cx - 5, cy + 5, cx + 5, cy - 5, fill=TEXT_DIM,
-                              width=1.5, tags="close")
-        search_cv.create_rectangle(cx - 14, 0, cx + 14, sb_h, fill="", outline="",
-                                   tags="close")
-        search_cv.tag_bind("close", "<Button-1>",
-                           lambda e: self._toggle_gallery_search(force_close=True))
-        search_cv.tag_bind("close", "<Enter>",
-                           lambda e: search_cv.configure(cursor="hand2"))
-        search_cv.tag_bind("close", "<Leave>",
-                           lambda e: search_cv.configure(cursor=""))
-
-        # Tabs de pastas
-        self._gallery_tabs_outer = tabs_outer = tk.Frame(f, bg=BG, height=44)
-        tabs_outer.pack(fill="x")
-        tabs_outer.pack_propagate(False)
-
-        self._tabs_canvas = tk.Canvas(tabs_outer, bg=BG,
-                                      highlightthickness=0, height=44)
-        self._tabs_canvas.pack(fill="x", padx=12, pady=4)
-
-        self._tabs_inner = tk.Frame(self._tabs_canvas, bg=BG)
-        self._tabs_win   = self._tabs_canvas.create_window(
-            0, 0, anchor="nw", window=self._tabs_inner)
-        self._tabs_inner.bind("<Configure>",
-            lambda e: self._tabs_canvas.configure(
-                scrollregion=self._tabs_canvas.bbox("all")))
-        self._tabs_canvas.bind("<MouseWheel>",
-            lambda e: self._tabs_canvas.xview_scroll(-1 * (e.delta // 120), "units"))
-
-        # Grid de imagens
+        # Grid ocupa a tela inteira; as ilhas flutuam por cima, sem reservar
+        # uma faixa fixa de cabeçalho — igual ao modelo de referência.
         grid_frame = tk.Frame(f, bg=BG)
-        grid_frame.pack(fill="both", expand=True)
+        grid_frame.place(x=0, y=0, width=W, height=H)
 
-        self.gal_canvas  = tk.Canvas(grid_frame, bg=BG,
-                                     highlightthickness=0, bd=0)
+        self.gal_canvas = tk.Canvas(grid_frame, bg=BG, highlightthickness=0, bd=0)
         self.gal_canvas.pack(fill="both", expand=True)
 
         self.gal_inner = tk.Frame(self.gal_canvas, bg=BG)
@@ -887,49 +814,141 @@ class SnapNoteApp:
         self._bind_wheel(self.gal_canvas)
         self._bind_wheel(self.gal_inner)
 
+        # Ilha flutuante: voltar (canto superior esquerdo)
+        back_btn = self._make_circle_button(
+            f, 38, lambda cv: self._draw_icon_chevron_left(cv, TEXT),
+            command=lambda: self.show_screen("camera"), bg=SURFACE2, hover_bg=SURFACE)
+        back_btn.place(x=12, y=14)
+
+        # Ilha flutuante: busca + menu (canto superior direito)
+        self._build_top_island(f)
+
+        # Barra de busca (some por baixo da ilha do topo, oculta por padrão)
+        sb_w, sb_h = W - 32, 44
+        self._gallery_search_wrap = tk.Canvas(f, width=sb_w, height=sb_h, bg=BG,
+                                              highlightthickness=0)
+
+        self._gallery_search_wrap.create_polygon(
+            self._pill_points(0, 0, sb_w, sb_h, sb_h / 2),
+            smooth=True, fill=SURFACE2, outline="")
+        self._gallery_search_wrap.create_oval(16, 14, 26, 24, outline=TEXT_DIM, width=1.5)
+        self._gallery_search_wrap.create_line(24, 22, 30, 28, fill=TEXT_DIM, width=1.5)
+
+        self.gal_search_entry = tk.Entry(
+            self._gallery_search_wrap, font=(FONT, 11), bg=SURFACE2, fg=TEXT,
+            insertbackground=TEXT, relief="flat", bd=0, highlightthickness=0,
+        )
+        self._gallery_search_wrap.create_window(
+            40, sb_h / 2, anchor="w", window=self.gal_search_entry,
+            width=sb_w - 40 - 36)
+        self.gal_search_entry.bind("<KeyRelease>", lambda e: self._render_grid())
+
+        cx, cy = sb_w - 22, sb_h / 2
+        self._gallery_search_wrap.create_line(cx - 5, cy - 5, cx + 5, cy + 5,
+                                              fill=TEXT_DIM, width=1.5, tags="close")
+        self._gallery_search_wrap.create_line(cx - 5, cy + 5, cx + 5, cy - 5,
+                                              fill=TEXT_DIM, width=1.5, tags="close")
+        self._gallery_search_wrap.create_rectangle(cx - 14, 0, cx + 14, sb_h,
+                                                    fill="", outline="", tags="close")
+        self._gallery_search_wrap.tag_bind(
+            "close", "<Button-1>", lambda e: self._toggle_gallery_search(force_close=True))
+        self._gallery_search_wrap.tag_bind(
+            "close", "<Enter>", lambda e: self._gallery_search_wrap.configure(cursor="hand2"))
+        self._gallery_search_wrap.tag_bind(
+            "close", "<Leave>", lambda e: self._gallery_search_wrap.configure(cursor=""))
+
+        # Ilha flutuante: palavras-chave (inferior, centralizada)
+        self._kw_island = tk.Canvas(f, bg=BG, highlightthickness=0)
+        self._kw_island.place(relx=0.5, rely=1.0, y=-14, anchor="s")
+
+    def _build_top_island(self, parent):
+        island_w, island_h = 84, 40
+        cv = tk.Canvas(parent, width=island_w, height=island_h, bg=BG,
+                       highlightthickness=0)
+        cv.place(relx=1.0, x=-12, y=14, anchor="ne")
+        cv.create_polygon(self._pill_points(0, 0, island_w, island_h, island_h / 2),
+                          smooth=True, fill=SURFACE2, outline="")
+
+        search_cv = tk.Canvas(cv, width=22, height=22, bg=SURFACE2,
+                              highlightthickness=0, cursor="hand2")
+        self._draw_icon_search(search_cv, TEXT)
+        cv.create_window(island_h / 2, island_h / 2, window=search_cv)
+        search_cv.bind("<Button-1>", lambda e: self._toggle_gallery_search())
+
+        menu_cv = tk.Canvas(cv, width=22, height=22, bg=SURFACE2,
+                            highlightthickness=0, cursor="hand2")
+        self._draw_icon_dots_vertical(menu_cv, TEXT)
+        cv.create_window(island_w - island_h / 2, island_h / 2, window=menu_cv)
+        menu_cv.bind("<Button-1>", lambda e: self._show_gallery_menu(None))
+
     def _bind_wheel(self, widget):
         widget.bind("<MouseWheel>",
                     lambda e: self.gal_canvas.yview_scroll(-1 * (e.delta // 120), "units"))
 
     def _refresh_gallery(self):
-        self._update_tabs()
+        self._redraw_keywords_island()
         self._render_grid()
 
     def _toggle_gallery_search(self, force_close: bool = False):
         if self._gallery_search_open or force_close:
-            self._gallery_search_wrap.pack_forget()
+            self._gallery_search_wrap.place_forget()
             self._gallery_search_open = False
             self.gal_search_entry.delete(0, "end")
         else:
-            self._gallery_search_wrap.pack(fill="x", before=self._gallery_tabs_outer)
+            self._gallery_search_wrap.place(relx=1.0, x=-12, y=62, anchor="ne")
             self._gallery_search_open = True
             self.gal_search_entry.focus_set()
         self._render_grid()
 
-    def _update_tabs(self):
-        for w in self._tabs_inner.winfo_children():
-            w.destroy()
+    def _redraw_keywords_island(self):
+        cv = self._kw_island
+        cv.delete("all")
 
-        fnt = tkfont.Font(family=FONT, size=9, weight="bold")
-        pill_h = 32
-        for folder in ["Todas"] + self.palavrasChaves:
-            active  = folder == self.gallery_folder
-            pill_w  = fnt.measure(folder) + 28
+        folders = ["Todas"] + self.palavrasChaves
+        fnt     = tkfont.Font(family=FONT, size=10, weight="bold")
+        seg_w   = max(70, max(fnt.measure(fo) for fo in folders) + 34)
+        island_h = 58
+        island_w = min(W - 24, seg_w * len(folders))
+        cv.configure(width=island_w, height=island_h)
+        cv.create_polygon(self._pill_points(0, 0, island_w, island_h, island_h / 2),
+                          smooth=True, fill=SURFACE2, outline="")
 
-            cv = tk.Canvas(self._tabs_inner, width=pill_w, height=pill_h,
-                           bg=BG, highlightthickness=0, cursor="hand2")
-            cv.pack(side="left", padx=(0, 8))
-            fill = GOLD if active else SURFACE2
-            fg   = "#1A1400" if active else TEXT_DIM
-            cv.create_polygon(self._pill_points(0, 0, pill_w, pill_h, pill_h / 2),
-                              smooth=True, fill=fill, outline="")
-            cv.create_text(pill_w / 2, pill_h / 2, text=folder, fill=fg,
-                           font=(FONT, 9, "bold" if active else "normal"))
-            cv.bind("<Button-1>", lambda e, fo=folder: self._select_tab(fo))
+        seg = island_w / len(folders)
+        for i, folder in enumerate(folders):
+            active = folder == self.gallery_folder
+            cx = seg * i + seg / 2
+            tag = f"kwseg{i}"
+            if active:
+                pad = 6
+                cv.create_polygon(
+                    self._pill_points(cx - seg / 2 + pad, pad,
+                                      cx + seg / 2 - pad, island_h - pad,
+                                      (island_h - 2 * pad) / 2),
+                    smooth=True, fill=GOLD, outline="", tags=tag)
+                fg = "#1A1400"
+            else:
+                fg = TEXT_DIM
+            cv.create_text(cx, island_h / 2, text=folder, fill=fg,
+                           font=(FONT, 10, "bold" if active else "normal"), tags=tag)
+            cv.create_rectangle(cx - seg / 2, 0, cx + seg / 2, island_h,
+                                fill="", outline="", tags=tag)
+            cv.tag_bind(tag, "<Button-1>", lambda e, fo=folder: self._select_tab(fo))
 
     def _select_tab(self, folder: str):
         self.gallery_folder = folder
         self._refresh_gallery()
+
+    def _parse_capture_dt(self, path: str):
+        name = os.path.basename(path)
+        try:
+            stem = name.rsplit(".", 1)[0]
+            ts_part = stem.split("_", 1)[1]
+            return datetime.strptime(ts_part, "%Y%m%d_%H%M%S")
+        except Exception:
+            return None
+
+    def _format_date_header(self, dt) -> str:
+        return f"{dt.day} de {MESES_PT[dt.month - 1]}."
 
     def _render_grid(self):
         for w in self.gal_inner.winfo_children():
@@ -941,9 +960,13 @@ class SnapNoteApp:
         if query:
             images = [i for i in images if query in i.get("anotacao", "").lower()]
 
+        images.sort(key=lambda i: self._parse_capture_dt(i["imagem"]) or datetime.min,
+                   reverse=True)
+
         if not images:
             empty = tk.Frame(self.gal_inner, bg=BG, pady=70)
             empty.pack(fill="x")
+            tk.Frame(empty, bg=BG, height=40).pack()
             icon_cv = tk.Canvas(empty, width=36, height=36, bg=BG,
                                 highlightthickness=0)
             icon_cv.pack()
@@ -953,48 +976,68 @@ class SnapNoteApp:
                      pady=10).pack()
             return
 
-        # Calcula largura do thumb (2 colunas, sem barra de rolagem visível)
-        gap     = 10
-        ncols   = 2
-        cap_h   = 30
-        thumb_w = (W - gap * (ncols - 1)) // ncols
-        thumb_h = thumb_w
-        cell_h  = thumb_h + cap_h
-
         # Atualiza largura interna
         self.gal_canvas.itemconfig(self._gal_win, width=W)
 
+        ncols   = 3
+        thumb_w = W // ncols
+        thumb_h = thumb_w
+        cap_h   = 32
+        cell_h  = thumb_h + cap_h
+
+        last_date_label = None
         row_frame = None
-        for idx, item in enumerate(images):
-            col = idx % ncols
+        col = 0
+        for item in images:
+            dt = self._parse_capture_dt(item["imagem"])
+            date_label = self._format_date_header(dt) if dt else "Sem data"
+
+            if date_label != last_date_label:
+                hdr = tk.Frame(self.gal_inner, bg=BG)
+                hdr.pack(fill="x")
+                self._bind_wheel(hdr)
+                top_pad = 60 if last_date_label is None else 20
+                tk.Label(hdr, text=date_label, font=(FONT, 13, "bold"),
+                         bg=BG, fg=TEXT, anchor="w").pack(
+                             fill="x", padx=14, pady=(top_pad, 8))
+                last_date_label = date_label
+                row_frame = None
+                col = 0
+
             if col == 0:
                 row_frame = tk.Frame(self.gal_inner, bg=BG)
-                row_frame.pack(fill="x", pady=(0, gap))
+                row_frame.pack(fill="x")
                 self._bind_wheel(row_frame)
 
             cell = tk.Frame(row_frame, bg=BG, width=thumb_w, height=cell_h,
                             cursor="hand2")
-            cell.pack(side="left", padx=(0, gap if col == 0 else 0))
+            cell.pack(side="left")
             cell.pack_propagate(False)
             self._bind_wheel(cell)
 
-            img_lbl = tk.Label(cell, bg=BG, cursor="hand2")
+            img_lbl = tk.Label(cell, bg=SURFACE2, cursor="hand2")
             img_lbl.place(x=0, y=0, width=thumb_w, height=thumb_h)
-            self._load_thumb(item["imagem"], img_lbl, thumb_w, thumb_h)
+            self._load_thumb(item["imagem"], img_lbl, thumb_w, thumb_h, radius=0)
             self._bind_wheel(img_lbl)
 
+            path  = item["imagem"]
             annot = item.get("anotacao", "")
-            cap_text = (annot[:26] + "…") if len(annot) > 26 else annot
-            cap_lbl = tk.Label(cell, text=cap_text or "Sem legenda", font=(FONT, 8),
+            cap_text = (annot[:18] + "…") if len(annot) > 18 else annot
+            cap_lbl = tk.Label(cell, text=cap_text or "Sem legenda", font=(FONT, 7),
                                bg=BG, fg=TEXT_DIM if annot else "#3A3A3C",
                                anchor="w")
-            cap_lbl.place(x=1, y=thumb_h + 6, width=thumb_w - 2, height=cap_h - 6)
+            cap_lbl.place(x=3, y=thumb_h + 3, width=thumb_w - 6, height=cap_h - 4)
             self._bind_wheel(cap_lbl)
 
-            path = item["imagem"]
-            for widget in (cell, img_lbl):
+            for widget in (cell, img_lbl, cap_lbl):
                 widget.bind("<Button-1>",
                     lambda e, p=path, a=annot: self._open_detail(p, a))
+
+            col = (col + 1) % ncols
+
+        # Espaçador final para poder rolar as últimas fotos para além da
+        # ilha de palavras-chave, que flutua fixa na parte inferior.
+        tk.Frame(self.gal_inner, bg=BG, height=88).pack(fill="x")
 
     def _get_folder_images(self) -> list[dict]:
         if self.gallery_folder == "Todas":
@@ -1014,14 +1057,14 @@ class SnapNoteApp:
                 result.append({"imagem": p, "anotacao": annot})
         return result
 
-    def _load_thumb(self, path: str, label: tk.Label, w: int, h: int):
+    def _load_thumb(self, path: str, label: tk.Label, w: int, h: int, radius: int = 16):
         try:
             img = Image.open(path)
             ew, eh = img.size
             m   = min(ew, eh)
             img = img.crop(((ew - m) // 2, (eh - m) // 2,
                             (ew + m) // 2, (eh + m) // 2))
-            ref = self._rounded_image(img, w, h, radius=16)
+            ref = self._rounded_image(img, w, h, radius=radius)
             self._thumb_refs.append(ref)
             label.configure(image=ref)
         except Exception:
@@ -1029,14 +1072,10 @@ class SnapNoteApp:
 
     # ── Detalhe da imagem ─────────────────────────────────────────────────────
     def _format_capture_meta(self, path: str) -> str:
-        name = os.path.basename(path)
-        try:
-            stem = name.rsplit(".", 1)[0]
-            ts_part = stem.split("_", 1)[1]
-            dt = datetime.strptime(ts_part, "%Y%m%d_%H%M%S")
+        dt = self._parse_capture_dt(path)
+        if dt:
             return dt.strftime("%d/%m/%Y às %H:%M")
-        except Exception:
-            return name
+        return os.path.basename(path)
 
     def _open_detail(self, path: str, annotation: str):
         win = tk.Toplevel(self.root)
@@ -1044,6 +1083,7 @@ class SnapNoteApp:
         win.geometry(f"{W}x{CONTENT_H}+{self.root.winfo_x()}+{self.root.winfo_y()}")
         win.configure(bg=BG)
         win.resizable(False, False)
+        theme.apply_dark_titlebar(win)
         win.grab_set()
         win.bind("<Escape>", lambda e: win.destroy())
 
@@ -1261,6 +1301,7 @@ class SnapNoteApp:
         win.title("Palavras-chave")
         win.configure(bg=BG)
         win.resizable(False, False)
+        theme.apply_dark_titlebar(win)
 
         body = tk.Frame(win, bg=BG)
         body.pack(fill="both", expand=True)

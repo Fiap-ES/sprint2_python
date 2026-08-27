@@ -88,6 +88,42 @@ def resolve_fonts() -> None:
           f"medium='{FONT_MEDIUM}'.")
 
 
+def apply_dark_titlebar(window) -> None:
+    """Pinta a barra de título nativa do Windows de escuro (em vez do branco
+    padrão), para combinar com o tema escuro do app. Não remove a barra —
+    arrastar, minimizar e fechar continuam funcionando normalmente.
+
+    Precisa rodar depois que a janela (root ou Toplevel) já foi criada.
+    Sem efeito fora do Windows 10 20H1+/11 (silenciosamente ignorado).
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        # update() (não só update_idletasks()) força o Tk a de fato criar/
+        # mapear a janela no Windows antes de pedirmos o HWND — sem isso,
+        # em janelas ainda não exibidas (como o root antes do mainloop), a
+        # chamada ao DWM pode não ter um HWND válido para agir.
+        window.update()
+        hwnd = ctypes.windll.user32.GetParent(window.winfo_id())
+        DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+        value = ctypes.c_int(1)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE,
+            ctypes.byref(value), ctypes.sizeof(value))
+        # Se a janela já estiver visível, o DWM só repinta a moldura na
+        # próxima mudança de tamanho/estado — força esse repaint agora.
+        SWP_NOMOVE = 0x0002
+        SWP_NOSIZE = 0x0001
+        SWP_NOZORDER = 0x0004
+        SWP_NOACTIVATE = 0x0010
+        SWP_FRAMECHANGED = 0x0020
+        ctypes.windll.user32.SetWindowPos(
+            hwnd, 0, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED)
+    except Exception:
+        pass
+
+
 def letter_spaced(text: str) -> str:
     """Aproxima tracking positivo inserindo um espaço fino entre letras.
 
