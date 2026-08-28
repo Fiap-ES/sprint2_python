@@ -7,12 +7,12 @@
 ## 🚀 Funcionalidades
 
 * **Câmera ao vivo:** Visualize o feed da sua webcam em tempo real dentro da própria janela da interface e capture fotos com um clique no botão shutter circular.
-* **Anotação rápida:** Após capturar uma foto, um painel desliza da parte inferior da tela para você digitar ou ditar (por voz) a anotação antes de salvar.
-* **Organização automática por palavras-chave:** Cadastre palavras-chave pelo menu da galeria. Toda vez que uma anotação contiver a palavra, a imagem é copiada automaticamente para a pasta correspondente.
-* **Galeria com filtro por pastas:** Veja todas as fotos em um grid de duas colunas ou filtre por palavra-chave usando as abas horizontais no topo da galeria.
-* **Busca em tempo real:** Pesquise por qualquer trecho de anotação na tela de busca e os resultados aparecem instantaneamente enquanto você digita.
+* **Anotação rápida:** Após capturar uma foto, um popup flutuante aparece sobre a prévia escurecida da imagem, com ícones para escrever a anotação manualmente ou ditá-la por voz — a gravação transcreve e salva automaticamente, sem precisar de outra ação.
+* **Organização automática por palavras-chave:** Cadastre palavras-chave por um diálogo próprio da aplicação. Toda vez que uma anotação contiver a palavra, a imagem é copiada automaticamente para a pasta correspondente.
+* **Galeria estilo Google Fotos:** Grid de três colunas, sem bordas arredondadas, com as fotos agrupadas por data de captura (mais recentes primeiro) e a legenda da anotação exibida abaixo de cada miniatura.
+* **Busca integrada à galeria:** Toque no ícone de lupa para abrir um campo de busca flutuante que filtra as anotações a cada tecla digitada — sem precisar trocar de tela.
 * **Persistência de dados:** Anotações e palavras-chave são salvas automaticamente em `snapnote_data.json` e recarregadas na próxima vez que você abrir o app.
-* **Detalhe de imagem:** Toque em qualquer foto para ver a imagem em tamanho maior junto com sua anotação completa.
+* **Detalhe de imagem:** Toque em qualquer foto para ver a imagem ampliada com cantos arredondados, a anotação completa e a data da captura formatada.
 
 ---
 
@@ -75,19 +75,20 @@ sprint2_python/
 
 ## 🖥️ Navegação
 
-A janela possui três telas acessíveis pela barra de navegação inferior:
+A janela possui duas telas:
 
-| Ícone | Tela | O que faz |
-|-------|------|-----------|
-| ◉ | **Câmera** | Exibe o feed ao vivo e permite capturar fotos |
-| ⊞ | **Galeria** | Mostra as fotos em grid, com filtro por pasta e menu de palavras-chave |
-| ○ | **Busca** | Pesquisa anotações em tempo real |
+| Tela | Como chegar lá | O que faz |
+|------|-----------------|-----------|
+| **Câmera** | Tela inicial do app | Exibe o feed ao vivo e permite capturar fotos |
+| **Galeria** | Toque na miniatura no canto inferior esquerdo da câmera | Mostra as fotos organizadas por data, com busca e menu de palavras-chave nas ilhas flutuantes |
+
+Na galeria, o botão circular no canto superior esquerdo volta para a câmera.
 
 ---
 
 ## 🎙️ Anotação por voz
 
-Após capturar uma foto, o botão 🎤 no painel de anotação grava sua voz e transcreve automaticamente para texto usando a API do Google (requer conexão com a internet). Se preferir, basta digitar a anotação diretamente no campo de texto.
+Após capturar uma foto, o popup de anotação exibe uma pílula com ícones — toque no microfone para gravar sua voz e transcrever automaticamente para texto usando a API do Google (requer conexão com a internet), ou toque no ícone de lápis para digitar a anotação num campo de texto.
 
 ---
 
